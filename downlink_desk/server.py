@@ -209,10 +209,12 @@ class App:
             satmeta = dbm.smeta_get(self.conn, n, "satellite") or {}
             last_attempt = dbm.smeta_get(self.conn, n, "last_attempt_ms")
             last_ok = dbm.smeta_get(self.conn, n, "last_ok_ms")
-        try:
-            size = self.cfg.db_path.stat().st_size
-        except OSError:
-            size = 0
+        size = 0
+        for suffix in ("", "-wal"):   # in WAL mode recent data lives in the -wal file until a checkpoint
+            try:
+                size += self.cfg.db_path.with_name(self.cfg.db_path.name + suffix).stat().st_size
+            except OSError:
+                pass
         return {"now": dbm.now_ms(), "server_started_ms": STARTED, "last_attempt_ms": last_attempt,
                 "last_ok_ms": last_ok, "auth_error": bool(g("auth_error", False)),
                 "token_present": bool(self.cfg.token), "fetches": fetches,
