@@ -1,0 +1,796 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Downlink Desk Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: live operations console — status strip, telemetry + frame timeline (left) beside alerts,
+   daily check and ground segment (right). Frames, passes, audit trail, handover and about in tabs. */
+:root{
+  --bg:#e9edf1; --panel:#fbfcfd; --sunk:#f1f4f7; --ink:#15212c; --muted:#5b6b79; --line:#d2dae1;
+  --accent:#2a55b5; --accent-ink:#ffffff; --accent-bg:#e3eafa;
+  --ok:#1d7f53; --warn:#a86c10; --crit:#bf3227; --stale:#7f8c99;
+  --ok-bg:#e1f2e9; --warn-bg:#fbefd9; --crit-bg:#fbe3e0; --stale-bg:#e7ebef;
+  --live:#1d7f53; --scrim:rgba(14,22,30,.42);
+  --t1:#2a55b5; --t2:#8a4fb8; --t3:#1d7f53; --t4:#a86c10; --t5:#7f8c99;
+  --f-display:"IBM Plex Sans Condensed","Arial Narrow",system-ui,sans-serif;
+  --f-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0c131a; --panel:#121c26; --sunk:#0f1820; --ink:#d9e3eb; --muted:#8798a8; --line:#233241;
+  --accent:#7aa2ff; --accent-ink:#0c131a; --accent-bg:#17284a;
+  --ok:#43c088; --warn:#e3a840; --crit:#f2675c; --stale:#6c7b8a;
+  --ok-bg:#12301f; --warn-bg:#33270f; --crit-bg:#3a1714; --stale-bg:#1a2531;
+  --live:#43c088; --scrim:rgba(0,0,0,.6);
+  --t1:#7aa2ff; --t2:#c191ec; --t3:#43c088; --t4:#e3a840; --t5:#7c8b9a; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0c131a; --panel:#121c26; --sunk:#0f1820; --ink:#d9e3eb; --muted:#8798a8; --line:#233241;
+  --accent:#7aa2ff; --accent-ink:#0c131a; --accent-bg:#17284a;
+  --ok:#43c088; --warn:#e3a840; --crit:#f2675c; --stale:#6c7b8a;
+  --ok-bg:#12301f; --warn-bg:#33270f; --crit-bg:#3a1714; --stale-bg:#1a2531;
+  --live:#43c088; --scrim:rgba(0,0,0,.6);
+  --t1:#7aa2ff; --t2:#c191ec; --t3:#43c088; --t4:#e3a840; --t5:#7c8b9a; color-scheme:dark}
+
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 var(--f-body)}
+.app{max-width:1480px;margin:0 auto;padding-inline:16px;padding-block:0 40px;display:flex;flex-direction:column;gap:14px}
+button,select,input,textarea{font:inherit;color:inherit}
+a{color:var(--accent)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.mono{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+.label{font:600 11px/1.2 var(--f-display);letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+h2{font:600 13px/1.2 var(--f-display);letter-spacing:.08em;text-transform:uppercase;margin:0}
+h3{margin:0}
+
+.livebar{margin-inline:-16px;padding:6px 16px;background:var(--ok-bg);border-bottom:1px solid var(--ok);font:600 12px/1.3 var(--f-display);letter-spacing:.08em;text-transform:uppercase;display:flex;flex-wrap:wrap;gap:4px 14px;justify-content:space-between;align-items:center}
+.livebar .pulse{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--live);margin-right:8px;animation:pulse 2s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.3}}
+.livebar span:last-child{color:var(--muted);font-weight:500;letter-spacing:.02em;text-transform:none;font-family:var(--f-body)}
+.livebar.down{background:var(--crit-bg);border-color:var(--crit)} .livebar.down .pulse{background:var(--crit)}
+@media (prefers-reduced-motion:reduce){.livebar .pulse,.chip.crit .dot{animation:none}}
+
+header.top{display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px 22px;padding-top:4px}
+.brand{display:flex;flex-direction:column;gap:3px;min-width:0}
+.brand b{font:700 25px/1 var(--f-display);letter-spacing:.01em}
+.brand small{color:var(--muted);font-size:13px}
+.clock{display:flex;gap:18px;flex-wrap:wrap}
+.clock div{display:flex;flex-direction:column;gap:2px}
+.clock .mono{font-size:17px;font-weight:500}
+.ctl{display:flex;gap:10px 12px;align-items:flex-end;flex-wrap:wrap;margin-left:auto}
+.fld{display:flex;flex-direction:column;gap:3px}
+.op input{width:8.5em;padding:6px 8px;border:1px solid var(--line);border-radius:5px;background:var(--panel)}
+.op input:placeholder-shown{border-color:var(--warn)}
+.iconbtn{border:1px solid var(--line);background:var(--panel);border-radius:5px;padding:6px 9px;cursor:pointer;font-size:13px;white-space:nowrap;text-decoration:none;color:var(--ink);display:inline-block}
+.iconbtn[aria-pressed="true"]{border-color:var(--accent);color:var(--accent)}
+.context{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;font-size:13px;color:var(--muted)}
+.context b{color:var(--ink);font-weight:600}
+.banner{padding:10px 14px;border:1px solid var(--line);border-radius:6px;background:var(--panel);font-size:13px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.banner.warn{border-color:var(--warn);background:var(--warn-bg)} .banner.crit{border-color:var(--crit);background:var(--crit-bg)}
+
+nav.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);overflow-x:auto}
+nav.tabs button{border:0;background:none;padding:9px 14px;cursor:pointer;font:600 13px var(--f-display);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);border-bottom:2px solid transparent;white-space:nowrap}
+nav.tabs button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
+nav.tabs .count{font-family:var(--f-mono);font-weight:500;margin-left:5px}
+nav.tabs .count.hot{color:var(--crit)}
+
+.strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}
+.chip{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:10px 12px;display:flex;flex-direction:column;gap:4px;min-width:0}
+.chip .v{font:600 18px/1.2 var(--f-display);letter-spacing:.02em;display:flex;align-items:center;gap:8px}
+.chip .s{font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--stale);flex:none;display:inline-block}
+.ok .dot,.dot.ok{background:var(--ok)} .warn .dot,.dot.warn{background:var(--warn)} .crit .dot,.dot.crit{background:var(--crit)}
+.chip.crit{border-color:var(--crit);background:var(--crit-bg)}
+.chip.crit .dot{animation:blink 1s steps(2) infinite}
+@keyframes blink{50%{opacity:.25}}
+
+.grid{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:14px;align-items:start}
+.col{display:flex;flex-direction:column;gap:14px;min-width:0}
+@media (max-width:1020px){.grid{grid-template-columns:minmax(0,1fr)}}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:6px;min-width:0}
+.ph{display:flex;align-items:center;justify-content:space-between;gap:8px 10px;padding:10px 14px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.ph .sub{font-size:12px;color:var(--muted)}
+.pb{padding:12px 14px}
+.stack{display:flex;flex-direction:column;gap:12px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.note{font-size:12.5px;color:var(--muted);margin:0}
+.empty{padding:16px 14px;color:var(--muted);font-size:13px}
+
+.btn{border:1px solid var(--line);background:var(--panel);border-radius:5px;padding:6px 11px;cursor:pointer;font-weight:500;font-size:13px;white-space:nowrap;text-decoration:none;color:var(--ink);display:inline-block}
+.btn:hover:not(:disabled){border-color:var(--accent)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.sm{padding:4px 8px;font-size:12px}
+input.txt,select.txt{padding:6px 8px;border:1px solid var(--line);border-radius:5px;background:var(--panel);min-width:0}
+
+.tlm{overflow-x:auto}
+table{border-collapse:collapse;width:100%}
+.tlm table{min-width:660px}
+.tlm th{text-align:left;padding:6px 10px;font:600 11px var(--f-display);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.tlm td{padding:5px 10px;border-top:1px solid var(--line);vertical-align:middle}
+.tlm tbody tr[data-ch]{cursor:pointer}
+.tlm tbody tr[data-ch]:hover td{background:var(--sunk)}
+.tlm tr.sub td{background:var(--sunk);font:600 12px var(--f-display);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);padding:5px 10px}
+.tlm .nm{font-weight:500}
+.tlm .val{font:500 15px var(--f-mono);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+.tlm .unit{color:var(--muted);font:12px var(--f-mono);padding-left:0}
+.tlm .lim{font:11px var(--f-mono);color:var(--muted);white-space:nowrap}
+.tlm .lim.mod{color:var(--accent)}
+.tlm .age{font:12px var(--f-mono);color:var(--muted);text-align:right;white-space:nowrap}
+.spark{width:120px;height:26px;display:block;color:var(--accent)}
+.spark.warn{color:var(--warn)} .spark.crit{color:var(--crit)} .spark.stale{color:var(--stale)}
+.pill{display:inline-block;font:600 10.5px/1 var(--f-display);letter-spacing:.09em;text-transform:uppercase;padding:4px 7px;border-radius:3px;white-space:nowrap;background:var(--stale-bg);color:var(--stale)}
+.pill.ok{background:var(--ok-bg);color:var(--ok)} .pill.warn{background:var(--warn-bg);color:var(--warn)} .pill.crit{background:var(--crit-bg);color:var(--crit)} .pill.acc{background:var(--accent-bg);color:var(--accent)}
+tr.row-warn .val{color:var(--warn)} tr.row-crit .val{color:var(--crit)} tr.row-stale .val{color:var(--muted)}
+
+.alert{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:4px 10px;padding:10px 14px;border-top:1px solid var(--line);align-items:start}
+.alerts>.alert:first-child{border-top:0}
+.alert .msg{font-weight:500;overflow-wrap:anywhere}
+.alert .meta{grid-column:2/4;font:12px var(--f-mono);color:var(--muted);overflow-wrap:anywhere}
+.alert .acts{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.alert.closed,.alert.shelved{opacity:.7}
+.shelf{grid-column:1/4;display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:8px 10px;background:var(--sunk);border-radius:5px}
+.shelf input{flex:1 1 12em}
+details.more summary{cursor:pointer;padding:8px 14px;border-top:1px solid var(--line);color:var(--muted);font-size:13px}
+
+.proc-g{padding:6px 14px 2px;font:600 11px var(--f-display);letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+.step{display:flex;gap:10px;align-items:flex-start;width:100%;text-align:left;border:0;background:none;padding:6px 14px;cursor:pointer}
+.step:hover:not(:disabled){background:var(--sunk)}
+.step:disabled{cursor:default}
+.box{width:16px;height:16px;border:1.5px solid var(--muted);border-radius:3px;flex:none;margin-top:2px;display:grid;place-items:center;font-size:11px;line-height:1;color:var(--accent-ink)}
+.step.done .box{background:var(--accent);border-color:var(--accent)}
+.step .who{display:block;font:11.5px var(--f-mono);color:var(--muted)}
+
+.events{list-style:none;margin:0;padding:0}
+.events li{display:grid;grid-template-columns:5.6em 5em minmax(0,1fr);gap:8px;padding:5px 14px;border-top:1px solid var(--line);font-size:13px}
+.events li:first-child{border-top:0}
+.events li span:last-child{overflow-wrap:anywhere}
+.events .mono{font-size:12px;color:var(--muted)}
+.tag{font:600 10px/1.6 var(--f-display);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.tag.ALERT{color:var(--crit)} .tag.OPERATOR{color:var(--accent)} .tag.EQUIP{color:var(--ok)} .tag.CONFIG{color:var(--accent)} .tag.DATA{color:var(--t2)}
+.notebox{display:flex;gap:8px;padding:10px 14px;border-top:1px solid var(--line)}
+.notebox input{flex:1}
+
+.chartbox{overflow-x:auto;padding:10px 14px 4px}
+.chartbox svg{width:100%;height:auto;display:block;min-width:560px}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--muted);padding:0 14px 10px}
+.legend i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;vertical-align:middle}
+
+.equip{width:100%}
+.equip td{padding:7px 14px;border-top:1px solid var(--line);vertical-align:middle}
+.equip tr:first-child td{border-top:0}
+.equip .nm{font-weight:500}
+.equip .nt{font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+.equip select{padding:4px 6px;border:1px solid var(--line);border-radius:4px;background:var(--panel);max-width:100%}
+.equip .pend td{background:var(--sunk);border-top:0}
+
+.dt{overflow-x:auto}
+.dt table{min-width:720px}
+.dt th{text-align:left;padding:7px 12px;font:600 11px var(--f-display);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--line);background:var(--panel);white-space:nowrap}
+.dt td{padding:6px 12px;border-top:1px solid var(--line);font-size:13px;vertical-align:top}
+.dt td.mono{font-size:12.5px;white-space:nowrap}
+.dt tr.fr{cursor:pointer} .dt tr.fr:hover td{background:var(--sunk)}
+.fields{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:2px 18px;font:12px var(--f-mono);padding:6px 0}
+.fields span{color:var(--muted)}
+.hex{font:11.5px/1.5 var(--f-mono);color:var(--muted);overflow-wrap:anywhere;margin-top:6px}
+.logtbl{max-height:70vh;overflow:auto}
+.logtbl th{position:sticky;top:0}
+.logtbl td.msg{overflow-wrap:anywhere;min-width:280px}
+.verify{font:12.5px var(--f-mono)}
+.verify.ok{color:var(--ok)} .verify.bad{color:var(--crit)}
+
+.ho{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:14px;align-items:start}
+@media (max-width:900px){.ho{grid-template-columns:minmax(0,1fr)}}
+textarea{width:100%;border:1px solid var(--line);border-radius:5px;background:var(--sunk);padding:10px 12px;resize:vertical}
+#hoText{font:12.5px/1.55 var(--f-mono);min-height:460px;white-space:pre;overflow:auto}
+#hoNotes{min-height:150px;background:var(--panel)}
+.field{display:flex;flex-direction:column;gap:6px}
+.field input{padding:7px 9px;border:1px solid var(--line);border-radius:5px;background:var(--panel)}
+.about p{max-width:72ch;margin:0}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:13px;margin:0}
+.kv dt{color:var(--muted)} .kv dd{margin:0;overflow-wrap:anywhere}
+
+.scrim{position:fixed;inset:0;background:var(--scrim);z-index:20;display:flex;justify-content:flex-end}
+.drawer{background:var(--panel);width:min(780px,100%);height:100%;overflow:auto;border-left:1px solid var(--line);
+  padding:calc(14px + env(safe-area-inset-top,0px)) 18px calc(24px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:16px}
+.dr-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+.dr-head h3{font:600 22px/1.15 var(--f-display)}
+.dr-now{display:flex;gap:12px;align-items:baseline;flex-wrap:wrap}
+.dr-now .big{font:500 32px/1 var(--f-mono);font-variant-numeric:tabular-nums}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px}
+.stats div{display:flex;flex-direction:column;gap:2px;padding:8px 10px;background:var(--sunk);border-radius:5px}
+.stats .mono{font-size:15px}
+.limform{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.limform label{display:flex;flex-direction:column;gap:4px}
+.limform input{padding:6px 8px;border:1px solid var(--line);border-radius:5px;background:var(--panel);font-family:var(--f-mono);width:100%}
+@media (max-width:520px){.limform{grid-template-columns:repeat(2,minmax(0,1fr))}}
+#toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(18px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:9px 14px;border-radius:6px;font-size:13px;max-width:calc(100% - 32px);box-shadow:0 4px 16px rgba(0,0,0,.2);z-index:40}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="livebar" id="livebar"><span><span class="pulse"></span><span id="liveText">Connecting to this Pi…</span></span><span>Volunteer-received data, decoded locally · not an official mission console · provisional limits</span></div>
+
+  <header class="top">
+    <div class="brand"><b>Downlink Desk</b><small id="sub">Loading…</small></div>
+    <div class="clock">
+      <div><span class="label">UTC</span><span class="mono" id="utc">--:--:--Z</span></div>
+      <div><span class="label">Date</span><span class="mono" id="date">----</span></div>
+    </div>
+    <div class="ctl">
+      <label class="fld op"><span class="label">Call sign</span><input id="cs" placeholder="Initials" maxlength="16" autocomplete="off"></label>
+      <label class="fld op" id="passFld" hidden><span class="label">Passcode</span><input id="pass" type="password" placeholder="For changes" maxlength="64" autocomplete="off"></label>
+      <div class="fld"><span class="label">Alarm tone</span><button class="iconbtn" id="sound" aria-pressed="false">Off</button></div>
+      <div class="fld"><span class="label">Practice</span><a class="iconbtn" href="/training" target="_blank" rel="noopener">Training simulator ↗</a></div>
+    </div>
+  </header>
+
+  <div class="context" id="context"></div>
+  <div class="banner" id="setupBanner" hidden></div>
+
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-tab="console" aria-selected="true">Console<span class="count" id="alertCount"></span></button>
+    <button role="tab" data-tab="frames" aria-selected="false">Frames<span class="count" id="frameCount"></span></button>
+    <button role="tab" data-tab="passes" aria-selected="false">Passes &amp; stations</button>
+    <button role="tab" data-tab="log" aria-selected="false">Audit trail<span class="count" id="logCount"></span></button>
+    <button role="tab" data-tab="handover" aria-selected="false">Shift handover</button>
+    <button role="tab" data-tab="about" aria-selected="false">About</button>
+  </nav>
+
+  <section id="tab-console" class="stack">
+    <div class="strip" id="strip"></div>
+    <div class="grid">
+      <div class="col">
+        <div class="panel">
+          <div class="ph"><h2>Spacecraft telemetry</h2><span class="sub">Latest decoded value per channel · select one for history and limits</span></div>
+          <div class="tlm"><table><thead><tr><th>Channel</th><th style="text-align:right">Value</th><th></th><th>Last 30 samples</th><th>Limits</th><th>Status</th><th style="text-align:right">Age</th></tr></thead><tbody id="tlmBody"></tbody></table></div>
+        </div>
+        <div class="panel">
+          <div class="ph"><h2>Frames received</h2><span class="sub">Last 72 hours · each dot is one frame from a volunteer station</span></div>
+          <div class="chartbox" id="frameChart"></div>
+          <div class="legend" id="frameLegend"></div>
+        </div>
+        <div class="panel">
+          <div class="ph"><h2>Recent events</h2><button class="btn sm" data-goto="log">Open audit trail</button></div>
+          <ul class="events" id="recent"></ul>
+          <form class="notebox" id="noteForm"><input class="txt" id="noteIn" maxlength="400" placeholder="Add a note to the log, e.g. ‘Heard the CW beacon on my handheld at 12:40Z’" aria-label="Log note"><button class="btn" type="submit">Log note</button></form>
+        </div>
+      </div>
+      <div class="col">
+        <div class="panel">
+          <div class="ph"><h2>Alerts</h2><div class="row"><span class="sub" id="alertNote"></span><button class="btn sm" id="ackAll" hidden>Acknowledge all</button></div></div>
+          <div class="alerts" id="alerts"></div>
+          <details class="more" id="shelvedBox" hidden><summary id="shelvedSum">Shelved</summary><div class="alerts" id="shelved"></div></details>
+          <details class="more"><summary id="closedSum">Recently closed</summary><div class="alerts" id="closed"></div></details>
+        </div>
+        <div class="panel">
+          <div class="ph"><h2>Daily check</h2><span class="sub" id="procNote"></span></div>
+          <div id="proc"></div>
+        </div>
+        <div class="panel">
+          <div class="ph"><h2>Ground segment</h2><span class="sub">Top two update themselves</span></div>
+          <div style="overflow-x:auto"><table class="equip"><tbody id="equip"></tbody></table></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="tab-frames" class="panel" hidden>
+    <div class="ph"><h2>Frames from SatNOGS</h2><div class="row"><select class="txt" id="frameFilter" aria-label="Filter frames"><option value="">All frames</option></select><a class="btn" href="/api/export/telemetry.csv">Download telemetry CSV</a></div></div>
+    <div class="pb"><p class="note">Raw frames uploaded by volunteer stations, decoded on this Pi with the community decoder. Select a row for every decoded field and the raw bytes. Unrecognised frames are ones the decoder couldn't parse, often digipeated traffic or noise.</p></div>
+    <div class="dt"><table><thead><tr><th>Time (UTC)</th><th>Heard by</th><th>Type</th><th>Key values</th></tr></thead><tbody id="frameBody"></tbody></table></div>
+    <div class="pb"><button class="btn" id="olderFrames">Load older frames</button></div>
+  </section>
+
+  <section id="tab-passes" class="stack" hidden>
+    <div class="panel">
+      <div class="ph"><h2>Passes over your station</h2><span class="sub" id="passNote"></span></div>
+      <div class="dt"><table><thead><tr><th>AOS (UTC)</th><th>LOS</th><th>Duration</th><th>Max elevation</th><th>Rises at (az)</th><th>Sets at (az)</th><th>Starts in</th></tr></thead><tbody id="passBody"></tbody></table></div>
+      <div class="pb"><p class="note">These are the times the satellite is above your horizon, worked out on the Pi from the latest orbit data. The telemetry above comes from volunteer stations anywhere in the world, so frames arrive at other times too. If you set up your own receiver, these are your listening windows.</p></div>
+    </div>
+    <div class="panel">
+      <div class="ph"><h2>Stations that heard it</h2><span class="sub">Last 7 days</span></div>
+      <div class="dt"><table><thead><tr><th>Station</th><th>Frames</th><th>Decoded</th><th>Last heard</th></tr></thead><tbody id="stationBody"></tbody></table></div>
+    </div>
+  </section>
+
+  <section id="tab-log" class="panel" hidden>
+    <div class="ph">
+      <h2>Audit trail</h2>
+      <div class="row">
+        <select class="txt" id="logFilter" aria-label="Filter by type"><option value="">All entries</option><option>OPERATOR</option><option>ALERT</option><option>DATA</option><option>EQUIP</option><option>CONFIG</option></select>
+        <button class="btn" id="verify">Verify chain</button>
+        <a class="btn" href="/api/export/log.json">Download signed log</a>
+      </div>
+    </div>
+    <div class="pb stack">
+      <p class="note">Every operator action is signed on the Pi: each entry stores a SHA-256 hash of its content and of the entry before it, so an edited or deleted entry shows up on verify. Alert events are worked out from the telemetry and can be reproduced at any time, so they aren't stored. Tamper-evident, not tamper-proof: someone with access to the Pi's files could rebuild the whole chain.</p>
+      <span class="verify" id="verifyOut"></span>
+    </div>
+    <div class="dt logtbl"><table><thead><tr><th>Time (UTC)</th><th>Type</th><th>By</th><th>Entry</th><th>Signature</th></tr></thead><tbody id="logBody"></tbody></table></div>
+  </section>
+
+  <section id="tab-handover" hidden>
+    <div class="ho">
+      <div class="panel">
+        <div class="ph"><h2>Handover report</h2><button class="btn" id="hoCopy">Copy</button></div>
+        <div class="pb"><textarea id="hoText" readonly aria-label="Handover report"></textarea></div>
+      </div>
+      <div class="panel">
+        <div class="ph"><h2>Sign off this shift</h2><span class="sub" id="dutyNote"></span></div>
+        <div class="pb stack">
+          <label class="field"><span class="label">Notes for the next operator <span style="text-transform:none;letter-spacing:0">· shared, saved as you type</span></span><textarea id="hoNotes" maxlength="4000" placeholder="What the data won't tell them: a station that keeps uploading noise, a limit you're unsure about, something you heard yourself…"></textarea></label>
+          <label class="field"><span class="label">Incoming operator</span><input id="hoNext" placeholder="Call sign" maxlength="16" autocomplete="off"></label>
+          <div class="row"><button class="btn primary" id="hoSign">Sign handover</button><button class="btn" id="takeDuty">Take the console</button></div>
+          <p class="note">Signing writes the report's hash, the notes and both call signs to the audit trail and puts the incoming operator on duty.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="tab-about" class="stack about" hidden>
+    <div class="panel pb stack" style="padding:18px">
+      <h2>What this is</h2>
+      <p>Downlink Desk is a lightweight operations console running on this Raspberry Pi. Every half hour or so it asks the SatNOGS database for new frames from <span class="satname">the satellite</span>, decodes them with the community decoder, and stores them here. The console checks the values against limits, notices when data stops arriving, keeps a signed log of who did what, and builds shift handovers.</p>
+      <p>It is not affiliated with the satellite's team and has no way to command the spacecraft. The limits are provisional values chosen for this console, not the mission's own. Do not rely on it for decisions about real hardware.</p>
+    </div>
+    <div class="panel pb stack" style="padding:18px">
+      <h2>Credits</h2>
+      <p>Telemetry comes from the <a href="https://satnogs.org" target="_blank" rel="noopener">SatNOGS</a> network run by the Libre Space Foundation and its volunteer station operators. SatNOGS data is shared under the <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener">CC BY-SA 4.0</a> licence. Frames are decoded with <a href="https://pypi.org/project/satnogs-decoders/" target="_blank" rel="noopener">satnogs-decoders</a>. Orbit data comes through SatNOGS from public sources. <span id="satCredit"></span></p>
+    </div>
+    <div class="panel">
+      <div class="ph"><h2>Channel map</h2><span class="sub">From the channels file in config</span></div>
+      <div class="pb"><p class="note" id="specNote"></p></div>
+      <div class="dt"><table><thead><tr><th>Channel</th><th>Decoder field</th><th>Conversion</th><th>Unit</th><th>Default limits</th></tr></thead><tbody id="specBody"></tbody></table></div>
+    </div>
+    <div class="panel pb" style="padding:18px"><dl class="kv" id="sysKv"></dl></div>
+  </section>
+</div>
+
+<div class="scrim" id="scrim" hidden><aside class="drawer" role="dialog" aria-modal="true" aria-labelledby="drTitle" id="drawer"></aside></div>
+<div id="toast" hidden></div>
+
+<script>
+(()=>{
+'use strict';
+/* ---------- utilities ---------- */
+const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const pad=n=>String(n).padStart(2,'0');
+const fmtT=t=>{const d=new Date(t);return pad(d.getUTCHours())+':'+pad(d.getUTCMinutes())+':'+pad(d.getUTCSeconds())+'Z'};
+const fmtHM=t=>{const d=new Date(t);return pad(d.getUTCHours())+':'+pad(d.getUTCMinutes())+'Z'};
+const fmtD=t=>new Date(t).toISOString().slice(0,10);
+const fmtDT=t=>fmtD(t).slice(5)+' '+fmtT(t);
+const dur=ms=>{ms=Math.max(0,Math.round(ms/1000));return pad(Math.floor(ms/3600))+':'+pad(Math.floor(ms%3600/60))+':'+pad(ms%60)};
+const ago=ms=>{const s=Math.max(0,Math.round(ms/1000));if(s<90)return s+' s';if(s<5400)return Math.round(s/60)+' min';if(s<172800)return (s/3600).toFixed(s<36000?1:0)+' h';return Math.round(s/86400)+' days'};
+const lsGet=(k,d)=>{try{const v=localStorage.getItem(k);return v==null?d:JSON.parse(v)}catch(e){return d}};
+const lsSet=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}};
+const HOUR=3600000,DAY=86400000,MIN=60000;
+let toastT;function toast(m){const el=$('#toast');el.textContent=m;el.hidden=false;clearTimeout(toastT);toastT=setTimeout(()=>el.hidden=true,4000)}
+
+/* ---------- server API ---------- */
+async function api(path,opts){
+  const o=Object.assign({headers:{}},opts||{});
+  if(o.body&&typeof o.body!=='string'){o.body=JSON.stringify(o.body);o.headers['Content-Type']='application/json'}
+  if(PASS)o.headers['X-Passcode']=PASS;
+  const r=await fetch(path,o);const j=await r.json().catch(()=>({}));
+  if(!r.ok){const e=new Error(j.error||j.message||('HTTP '+r.status));e.status=r.status;e.body=j;throw e}
+  return j;
+}
+
+/* ---------- state ---------- */
+const prefs=lsGet('downlinkdesk.live.prefs',{});
+let CS=prefs.cs||'',PASS=prefs.pass||'',SOUND=!!prefs.sound,tab=prefs.tab||'console';
+let CONF=null,CH=[],CHM={},SERIES={},FRAMES=[],FRAME_IDS=new Set(),LOG=[],HEALTH=null,PASSES=null,NOTES={text:''};
+let CFG={limits:{},acks:{},shelves:{},checks:{},equip:{},duty:null},D=null,online=false,lastPointT=0;
+const savePrefs=()=>lsSet('downlinkdesk.live.prefs',{cs:CS,pass:PASS,sound:SOUND,tab});
+
+/* ---------- configuration replayed from the signed log ---------- */
+const MANUAL_EQ=[{id:'rx',name:'Own receiver (SDR)',detail:'For hearing passes yourself',def:'Not installed'},{id:'ant',name:'Own antenna',detail:'UHF/VHF',def:'Not installed'}];
+const EQ_STATES=['Operational','Degraded','Down','Maintenance','Not installed'];
+const EQ_CLASS={Operational:'ok',Degraded:'warn',Down:'crit',Maintenance:'stale','Not installed':'stale'};
+const PROC=[['frames','Overnight frames reviewed'],['alerts','Open alerts reviewed and acknowledged'],['fetch','Fetcher healthy: last fetch succeeded'],['limits','Limits still sensible'],['note','Anything unusual written in the log']];
+const KIND_TYPE={ack:'OPERATOR',shelve:'OPERATOR',unshelve:'OPERATOR',check:'OPERATOR',note:'OPERATOR',duty:'OPERATOR',handover:'OPERATOR',equip:'EQUIP',limits:'CONFIG',system:'OPERATOR'};
+function validLim(l){return Array.isArray(l)&&l.length===4&&l.every(v=>v===null||(typeof v==='number'&&isFinite(v)))}
+function buildCfg(){
+  const c={limits:{},acks:{},shelves:{},checks:{},equip:{},duty:null,lastHandover:null};
+  for(const e of LOG){const d=e.data||{};
+    switch(e.kind){
+      case 'limits': if(CHM[d.ch]&&validLim(d.lim))(c.limits[d.ch]||(c.limits[d.ch]=[])).push({t:e.t,lim:d.lim,cs:e.cs});break;
+      case 'ack': c.acks[d.alert]={cs:e.cs,t:e.t,sev:d.sev};break;
+      case 'shelve': c.shelves[d.key]={cs:e.cs,t:e.t,until:+d.until||0,reason:String(d.reason||'')};break;
+      case 'unshelve': delete c.shelves[d.key];break;
+      case 'check': ((c.checks[d.day])||(c.checks[d.day]={}))[d.step]={cs:e.cs,t:e.t};break;
+      case 'equip': if(MANUAL_EQ.some(x=>x.id===d.eq)&&EQ_STATES.includes(d.status))(c.equip[d.eq]||(c.equip[d.eq]=[])).push({t:e.t,status:d.status,note:String(d.note||''),cs:e.cs});break;
+      case 'duty': c.duty={cs:e.cs,t:e.t};break;
+      case 'handover': c.duty={cs:String(d.to||''),t:e.t};c.lastHandover=e;break;
+    }}
+  CFG=c;
+}
+function limitsAt(ch,t){const a=CFG.limits[ch];let r=CHM[ch].lim,by=null;if(a)for(const x of a){if(x.t<=t){r=x.lim;by=x}else break}return {lim:r&&r.every(v=>v===null)?null:r,by}}
+function eqAt(id){const def=MANUAL_EQ.find(x=>x.id===id);const a=CFG.equip[id];return a&&a.length?a[a.length-1]:{status:def.def,note:'',t:null,cs:null}}
+function limStatus(lim,v){if(!lim||v==null)return 'ok';const [rl,yl,yh,rh]=lim;if((rl!=null&&v<rl)||(rh!=null&&v>rh))return 'crit';if((yl!=null&&v<yl)||(yh!=null&&v>yh))return 'warn';return 'ok'}
+const fv=(c,v)=>(+v).toFixed(c.dp)+(c.unit?' '+c.unit:'');
+function limitMsg(c,v,st,lim){const [rl,yl,yh,rh]=lim;const low=st==='crit'?(rl!=null&&v<rl):(yl!=null&&v<yl);const L=st==='crit'?(low?rl:rh):(low?yl:yh);return `${c.name} ${fv(c,v)} ${low?'below':'above'} ${st==='crit'?'alarm':'caution'} limit ${fv(c,L)}`}
+const limTxt=lim=>{if(!lim)return '—';const f=v=>v==null?'·':v;return `${f(lim[0])} / ${f(lim[1])} · ${f(lim[2])} / ${f(lim[3])}`};
+
+/* ---------- derive alerts from real data ---------- */
+function derive(now){
+  const alerts=[],sys=[];const A={};
+  const bad=(key,sev,t,msg,ch)=>{const s=A[key]||(A[key]={a:null,ok:0});s.ok=0;
+    if(!s.a){s.a={id:key+'@'+t,key,sev,sev0:sev,raised:t,cleared:null,esc:null,msg,first:msg,ch};alerts.push(s.a)}
+    else{if(sev==='crit'&&s.a.sev==='warn'){s.a.sev='crit';s.a.esc=t}s.a.msg=msg}};
+  const good=(key,t,need)=>{const s=A[key];if(!s||!s.a)return;if(++s.ok>=(need||2)){s.a.cleared=t;s.a=null;s.ok=0}};
+  for(const c of CH){const ser=SERIES[c.id]||[];let prev=null;
+    for(const [t,v] of ser){
+      const {lim}=limitsAt(c.id,t);
+      if(lim){const s=limStatus(lim,v);if(s!=='ok')bad('lim:'+c.id,s,t,limitMsg(c,v,s,lim),c.id);else good('lim:'+c.id,t)}
+      if(c.counter==='reboot'&&prev!=null&&v>prev)alerts.push({id:'reboot:'+c.id+'@'+t,key:'reboot:'+c.id,sev:'warn',sev0:'warn',raised:t,cleared:t,esc:null,event:true,ch:c.id,msg:`${c.name} went from ${prev} to ${v}: a restart since the previous frame`,first:''});
+      prev=v}}
+  // data freshness
+  const stale=(CONF.stale_hours||12)*HOUR,dec=FRAMES.filter(f=>f[4]).map(f=>f[1]);
+  for(let i=0;i<dec.length;i++){const a=dec[i],b=i+1<dec.length?dec[i+1]:null,gapEnd=b??now;
+    if(gapEnd-a>stale){const key='stale',t0=a+stale;
+      bad(key,'warn',t0,`No decoded frames for ${ago(Math.min(gapEnd,now)-a)} (since ${fmtDT(a)})`,null);
+      if(gapEnd-a>2*stale)bad(key,'crit',a+2*stale,`No decoded frames for ${ago(Math.min(gapEnd,now)-a)} (since ${fmtDT(a)})`,null);
+      if(b)good(key,b,1)}}
+  // fetcher health (current only)
+  if(HEALTH){
+    if(!HEALTH.token_present)alerts.push({id:'token@0',key:'token',sev:'crit',sev0:'crit',raised:HEALTH.server_started_ms,cleared:null,msg:'No SatNOGS API key on this Pi yet, so no data can be fetched',first:''});
+    else if(HEALTH.auth_error)alerts.push({id:'auth@'+(HEALTH.last_attempt_ms||0),key:'auth',sev:'crit',sev0:'crit',raised:HEALTH.last_attempt_ms||now,cleared:null,msg:'SatNOGS rejected the API key. Check secrets/satnogs_token on the Pi',first:''});
+    const lim=3*CONF.poll_minutes*MIN,base=HEALTH.last_ok_ms||HEALTH.server_started_ms;
+    if(HEALTH.token_present&&now-base>lim)alerts.push({id:'fetch@'+base,key:'fetch',sev:'crit',sev0:'crit',raised:base+lim,cleared:null,msg:HEALTH.last_ok_ms?`The Pi hasn't reached SatNOGS since ${fmtDT(HEALTH.last_ok_ms)}`:'The Pi has not completed a fetch from SatNOGS yet',first:''});
+  }
+  const cut=CONF.commissioned_ms||0;
+  const kept=alerts.filter(a=>a.raised>=cut||a.cleared==null);
+  kept.forEach(a=>{if(!a.first)a.first=a.msg});
+  for(const a of kept){
+    sys.push({t:a.raised,type:'ALERT',msg:(a.event?'EVENT: ':a.sev0==='crit'?'ALARM: ':'CAUTION: ')+a.first});
+    if(a.esc)sys.push({t:a.esc,type:'ALERT',msg:'Escalated to ALARM: '+a.msg});
+    if(a.cleared&&!a.event)sys.push({t:a.cleared,type:'ALERT',msg:'Condition cleared: '+a.msg})}
+  // data arrival events, grouped per observer burst
+  let burst=null;for(const f of FRAMES){if(burst&&burst.obs===f[2]&&f[1]-burst.last<20*MIN){burst.n++;burst.ok+=f[4];burst.last=f[1]}else{if(burst)sys.push(burstEv(burst));burst={obs:f[2],t:f[1],last:f[1],n:1,ok:f[4]}}}
+  if(burst)sys.push(burstEv(burst));
+  return {alerts:kept,sys:sys.filter(s=>s.t>=now-7*DAY)};
+}
+const burstEv=b=>({t:b.t,type:'DATA',msg:`${b.n} frame${b.n>1?'s':''} from ${b.obs||'unknown station'} (${b.ok} decoded)`});
+function alertView(now){
+  const list=D.alerts.map(a=>{const ack=CFG.acks[a.id];const acked=!!ack&&!(a.sev==='crit'&&ack.sev==='warn');
+    const closed=acked&&a.cleared!=null;const sh=CFG.shelves[a.key];const shelved=!closed&&sh&&sh.until>now?sh:null;
+    return {...a,ack:acked?ack:null,closed,shelved}});
+  const open=list.filter(a=>!a.closed&&!a.shelved).sort((a,b)=>(!!a.ack-!!b.ack)||((b.sev==='crit')-(a.sev==='crit'))||(b.raised-a.raised));
+  return {open,shelved:list.filter(a=>a.shelved),closed:list.filter(a=>a.closed).sort((a,b)=>b.cleared-a.cleared)};
+}
+
+/* ---------- actions (signed on the server) ---------- */
+function requireCs(){if(CS)return true;toast('Enter your call sign first. Every action is signed with it.');$('#cs').focus();return false}
+async function act(kind,data,msg){
+  if(!requireCs())return false;
+  try{const e=await api('/api/log',{method:'POST',body:{kind,data,msg,cs:CS}});LOG.push(e);buildCfg();refresh(true);return true}
+  catch(err){if(err.status===401){$('#passFld').hidden=false;toast('This console needs the operator passcode for changes. Enter it at the top.');$('#pass').focus()}else toast('Not saved: '+err.message);return false}
+}
+
+/* ---------- rendering ---------- */
+const ST_LABEL={ok:'Nominal',warn:'Caution',crit:'Alarm',stale:'Stale',nodata:'No data'};
+const ST_CLASS={ok:'ok',warn:'warn',crit:'crit',stale:'stale',nodata:'stale'};
+function latest(id){const s=SERIES[id];return s&&s.length?s[s.length-1]:null}
+function chState(c,now){const l=latest(c.id);if(!l)return {st:'nodata',v:null,at:null};const st=limStatus(limitsAt(c.id,now).lim,l[1]);const staleMs=(CONF.stale_hours||12)*HOUR*2;return {st:now-l[0]>staleMs&&st==='ok'?'stale':st,v:l[1],at:l[0]}}
+function sparkSVG(h,cls){
+  if(h.length<2)return `<svg class="spark ${cls}" viewBox="0 0 120 26"></svg>`;
+  let lo=Math.min(...h),hi=Math.max(...h);if(hi-lo<1e-9){lo-=1;hi+=1}
+  const n=30,x=i=>(i+(n-h.length))*(118/(n-1))+1,y=v=>23-(v-lo)/(hi-lo)*20;const pts=h.map((v,i)=>x(i).toFixed(1)+','+y(v).toFixed(1));
+  return `<svg class="spark ${cls}" viewBox="0 0 120 26" preserveAspectRatio="none" aria-hidden="true"><path d="M${x(0).toFixed(1)},25 L${pts.join(' L')} L${x(h.length-1).toFixed(1)},25 Z" fill="currentColor" fill-opacity=".12"/><polyline points="${pts.join(' ')}" fill="none" stroke="currentColor" stroke-width="1.4" vector-effect="non-scaling-stroke"/><circle cx="${x(h.length-1).toFixed(1)}" cy="${y(h[h.length-1]).toFixed(1)}" r="2" fill="currentColor"/></svg>`;
+}
+function buildTlm(){
+  let html='',sub='';
+  for(const c of CH){if(c.sub!==sub){sub=c.sub;html+=`<tr class="sub"><td colspan="7">${esc(sub)}</td></tr>`}
+    html+=`<tr id="r-${esc(c.id)}" data-ch="${esc(c.id)}" tabindex="0" aria-label="${esc(c.name)}: open history and limits"><td class="nm">${esc(c.name)}</td><td class="val" data-f="v">—</td><td class="unit">${esc(c.unit)}</td><td data-f="sp"></td><td class="lim" data-f="lim"></td><td data-f="st"></td><td class="age" data-f="age"></td></tr>`}
+  $('#tlmBody').innerHTML=html||'<tr><td colspan="7" class="empty">No channels in the channels file.</td></tr>';
+}
+function renderTlm(now){
+  for(const c of CH){const s=chState(c,now),tr=document.getElementById('r-'+c.id);if(!tr)continue;const cl=ST_CLASS[s.st];tr.className='row-'+cl;
+    tr.querySelector('[data-f=v]').textContent=s.v==null?'—':(+s.v).toFixed(c.dp);
+    tr.querySelector('[data-f=sp]').innerHTML=sparkSVG((SERIES[c.id]||[]).slice(-30).map(p=>p[1]),cl==='ok'?'':cl);
+    const L=limitsAt(c.id,now),le=tr.querySelector('[data-f=lim]');le.textContent=limTxt(L.lim);le.classList.toggle('mod',!!L.by);le.title=L.by?`Changed by ${L.by.cs} ${fmtDT(L.by.t)}`:'Alarm low / caution low · caution high / alarm high';
+    tr.querySelector('[data-f=st]').innerHTML=`<span class="pill ${cl}">${ST_LABEL[s.st]}</span>`;
+    tr.querySelector('[data-f=age]').textContent=s.at==null?'—':ago(now-s.at);}
+}
+function nextPass(now){return PASSES&&PASSES.passes?PASSES.passes.find(p=>p.los>now):null}
+function renderStrip(now,AV){
+  const lf=FRAMES.length?FRAMES[FRAMES.length-1]:null,ld=[...FRAMES].reverse().find(f=>f[4]);
+  let worst='ok';for(const c of CH){const l=latest(c.id);if(!l)continue;const s=limStatus(limitsAt(c.id,now).lim,l[1]);if(s==='crit')worst='crit';else if(s==='warn'&&worst==='ok')worst='warn'}
+  const un=AV.open.filter(a=>!a.ack),np=nextPass(now);
+  const fetchOk=HEALTH&&HEALTH.last_ok_ms,fetchCls=!HEALTH?'':(AV.open.some(a=>['fetch','auth','token'].includes(a.key))?'crit':'ok');
+  const staleA=AV.open.concat(AV.shelved).find(a=>a.key==='stale'&&a.cleared==null);
+  const chips=[
+    {cls:staleA?staleA.sev:ld?'ok':'',l:'Latest data',v:ld?ago(now-ld[1])+' ago':'None yet',s:ld?`Heard by ${ld[2]||'unknown'} · ${fmtDT(ld[1])}`:'Waiting for the first fetch'},
+    {cls:ld?worst:'',l:'Spacecraft',v:ld?{ok:'Nominal',warn:'Caution',crit:'Alarm'}[worst]:'—',s:'Against this console’s limits'},
+    {cls:un.some(a=>a.sev==='crit')?'crit':un.length?'warn':'ok',l:'Alerts',v:`${AV.open.length} open`,s:un.length?`${un.length} need acknowledgement`:(AV.shelved.length?`${AV.shelved.length} shelved`:'All acknowledged')},
+    {cls:fetchCls,l:'SatNOGS fetch',v:fetchOk?ago(now-HEALTH.last_ok_ms)+' ago':'Not yet',s:HEALTH?(HEALTH.fetching?'Fetching now…':`Every ${CONF.poll_minutes} min · ${HEALTH.frames_total} frames stored`):''},
+    {cls:'',l:'Next pass over you',v:np?(np.aos<=now?'Up now':'T− '+dur(np.aos-now)):'—',s:np?`${fmtHM(np.aos)} · max ${np.max_el}°`:(PASSES&&PASSES.note)||''},
+  ];
+  $('#strip').innerHTML=chips.map(c=>`<div class="chip ${c.cls}"><span class="label">${c.l}</span><span class="v">${c.cls?'<span class="dot"></span>':''}${esc(c.v)}</span><span class="s">${esc(c.s)}</span></div>`).join('');
+  const ac=$('#alertCount');ac.textContent=un.length?' '+un.length:'';ac.className='count'+(un.some(a=>a.sev==='crit')?' hot':'');
+  $('#frameCount').textContent=HEALTH?' '+HEALTH.frames_total:'';
+}
+let shelveOpen=null,lastAlertSig='';
+function alertRow(a){
+  const sevL=a.event?'Event':a.sev==='crit'?'Alarm':'Caution';let acts='';
+  if(!a.closed){acts=a.shelved?`<button class="btn sm" data-unshelve="${esc(a.key)}">Unshelve</button>`:(a.ack?'<span class="label">Acked</span>':`<button class="btn sm primary" data-ack="${esc(a.id)}">Acknowledge</button>`)+(a.event?'':`<button class="btn sm" data-shelve="${esc(a.id)}">Shelve</button>`)}
+  const meta=[`Raised ${fmtDT(a.raised)}`,a.esc?'escalated '+fmtT(a.esc):'',a.event?'':(a.cleared==null?'condition active':'cleared '+fmtDT(a.cleared)),a.ack?`acked by ${esc(a.ack.cs)} ${fmtHM(a.ack.t)}`:'',a.shelved?`shelved by ${esc(a.shelved.cs)} until ${fmtHM(a.shelved.until)}: ${esc(a.shelved.reason)}`:''].filter(Boolean).join(' · ');
+  const shelf=shelveOpen===a.id?`<form class="shelf" data-shelf="${esc(a.id)}"><select class="txt" id="shelfDur" aria-label="Shelve for"><option value="60">1 hour</option><option value="360" selected>6 hours</option><option value="1440">1 day</option><option value="10080">1 week</option></select><input class="txt" id="shelfReason" maxlength="160" placeholder="Reason (required)" aria-label="Reason"><button class="btn sm primary" type="submit">Shelve</button><button class="btn sm" type="button" data-shelfcancel>Cancel</button></form>`:'';
+  return `<div class="alert${a.closed?' closed':''}${a.shelved?' shelved':''}"><span class="pill ${a.event?'acc':a.sev}">${sevL}</span><span class="msg">${a.ch&&CHM[a.ch]?`<a href="#" data-chlink="${esc(a.ch)}" style="color:inherit">${esc(a.msg)}</a>`:esc(a.msg)}</span><span class="acts">${acts}</span><span class="meta">${meta}</span>${shelf}</div>`;
+}
+function renderAlerts(AV){
+  const sig=JSON.stringify([AV.open.map(a=>[a.id,a.sev,!!a.ack,a.cleared,a.msg]),AV.shelved.map(a=>a.id),AV.closed.length,shelveOpen]);if(sig===lastAlertSig)return;lastAlertSig=sig;
+  const keep=shelveOpen&&$('#shelfReason')?{r:$('#shelfReason').value,d:$('#shelfDur').value}:null;
+  $('#alerts').innerHTML=AV.open.length?AV.open.slice(0,15).map(alertRow).join('')+(AV.open.length>15?`<div class="empty">${AV.open.length-15} more not shown. Acknowledge or shelve to clear the list.</div>`:''):'<div class="empty">No open alerts. Limit breaks, restarts, missing data and fetch problems appear here.</div>';
+  if(keep&&$('#shelfReason')){$('#shelfReason').value=keep.r;$('#shelfDur').value=keep.d}
+  $('#shelvedBox').hidden=!AV.shelved.length;$('#shelvedSum').textContent=`Shelved (${AV.shelved.length})`;$('#shelved').innerHTML=AV.shelved.map(alertRow).join('');
+  $('#closedSum').textContent=`Recently closed (${AV.closed.length})`;
+  $('#closed').innerHTML=AV.closed.length?AV.closed.slice(0,10).map(alertRow).join(''):'<div class="empty">Alerts close once the condition has cleared and someone has acknowledged them.</div>';
+  const un=AV.open.filter(a=>!a.ack);$('#alertNote').textContent=AV.open.length?`${AV.open.length} open · ${un.length} unacknowledged`:'All clear';$('#ackAll').hidden=un.length<2;
+}
+function renderProc(now){
+  const day=fmtD(now),c=CFG.checks[day]||{};$('#procNote').textContent=`${day} UTC · ${Object.keys(c).length}/${PROC.length}`;
+  $('#proc').innerHTML=PROC.map(([id,txt])=>{const d=c[id];return `<button class="step${d?' done':''}" data-step="${id}" data-day="${day}" ${d?'disabled':''}><span class="box">${d?'✓':''}</span><span>${esc(txt)}${d?`<span class="who">${esc(d.cs)} · ${fmtT(d.t)}</span>`:''}</span></button>`}).join('')+'<div style="height:8px"></div>';
+}
+let eqPending=null;
+function renderEquip(now){
+  const H=HEALTH;const fails=H?H.fetches.slice(0,3).filter(f=>!f.ok).length:0;
+  const link=!H?['stale','Unknown','']:H.auth_error?['crit','Key rejected','SatNOGS refused the API key']:!H.token_present?['crit','No API key','Add it to secrets/satnogs_token']:(AV_cache.open.some(a=>a.key==='fetch'))?['crit','Down',H.fetches[0]?H.fetches[0].message:'']:fails?['warn','Degraded',H.fetches[0].message]:['ok','Operational',H.fetches[0]?H.fetches[0].message:'No fetches yet'];
+  const auto=[
+    {name:'Raspberry Pi server',st:online?['ok','Operational']:['crit','Unreachable'],note:H?`Up ${ago(now-H.server_started_ms)} · database ${(H.db_bytes/1e6).toFixed(1)} MB`:''},
+    {name:'SatNOGS link',st:[link[0],link[1]],note:link[2]}];
+  let html=auto.map(a=>`<tr><td style="width:1%"><span class="dot ${a.st[0]}"></span></td><td><div class="nm">${esc(a.name)}</div><div class="nt">${esc(a.note)}</div></td><td style="text-align:right"><span class="pill ${a.st[0]}">${esc(a.st[1])}</span></td></tr>`).join('');
+  html+=MANUAL_EQ.map(e=>{const s=eqAt(e.id),pend=eqPending&&eqPending.id===e.id;
+    return `<tr><td style="width:1%"><span class="dot ${EQ_CLASS[s.status]}"></span></td><td><div class="nm">${esc(e.name)}</div><div class="nt">${esc(s.note||e.detail)}${s.cs?` · ${esc(s.cs)} ${fmtHM(s.t)}`:''}</div></td><td style="text-align:right"><select data-eq="${e.id}" id="eq-${e.id}" aria-label="${esc(e.name)} status">${EQ_STATES.map(x=>`<option${x===(pend?eqPending.status:s.status)?' selected':''}>${x}</option>`).join('')}</select></td></tr>`+
+    (pend?`<tr class="pend"><td></td><td colspan="2"><form class="row" data-eqform="${e.id}"><input class="txt" id="eqNote" style="flex:1 1 12em" maxlength="160" placeholder="Note, e.g. RTL-SDR v4 on the Pi" aria-label="Note"><button class="btn sm primary" type="submit">Save</button><button class="btn sm" type="button" data-eqcancel>Cancel</button></form></td></tr>`:'')}).join('');
+  const box=$('#equip');if(box.dataset.sig!==html){const focus=document.activeElement&&document.activeElement.id==='eqNote'?$('#eqNote').value:null;box.innerHTML=html;box.dataset.sig=html;if(focus!=null&&$('#eqNote')){$('#eqNote').value=focus;$('#eqNote').focus()}}
+}
+const TYPE_COLORS=['--t1','--t2','--t3','--t4','--t5'];
+function typeColor(name){const types=(CONF.spec.frame_types||[]).map(t=>t.name);const i=types.indexOf(name);return i<0?'var(--t5)':`var(${TYPE_COLORS[i%4]})`}
+function renderFrameChart(now){
+  const W=1000,H=150,L=8,R=8,T=10,B=26,ws=now-72*HOUR;const X=t=>L+(t-ws)/(now-ws)*(W-L-R);
+  const types=[...new Set(FRAMES.filter(f=>f[1]>=ws).map(f=>f[3]))];const lane=(H-T-B)/Math.max(1,types.length);
+  let g='';
+  if(PASSES&&PASSES.passes)for(const p of PASSES.passes){if(p.los<ws||p.aos>now)continue;g+=`<rect x="${X(Math.max(p.aos,ws)).toFixed(1)}" y="${T}" width="${Math.max(2,X(Math.min(p.los,now))-X(Math.max(p.aos,ws))).toFixed(1)}" height="${H-T-B}" fill="var(--accent)" fill-opacity=".08"/>`}
+  for(let h=Math.ceil(ws/(6*HOUR))*6*HOUR;h<now;h+=6*HOUR){const x=X(h);g+=`<line x1="${x}" x2="${x}" y1="${T}" y2="${H-B}" stroke="var(--line)"/><text x="${x}" y="${H-8}" text-anchor="middle" font-size="11" font-family="IBM Plex Mono,monospace" fill="var(--muted)">${new Date(h).getUTCHours()===0?fmtD(h).slice(5):fmtHM(h)}</text>`}
+  types.forEach((ty,i)=>{const y=T+lane*i+lane/2;g+=`<text x="${L}" y="${(y-lane/2+11).toFixed(1)}" font-size="10" font-family="IBM Plex Sans Condensed,sans-serif" letter-spacing=".06em" fill="var(--muted)">${esc(ty.toUpperCase())}</text>`;
+    for(const f of FRAMES){if(f[1]<ws||f[3]!==ty)continue;g+=`<circle cx="${X(f[1]).toFixed(1)}" cy="${(y+3).toFixed(1)}" r="3.2" fill="${typeColor(ty)}" fill-opacity=".85"><title>${esc(ty)} · ${fmtDT(f[1])} · ${esc(f[2])}</title></circle>`}});
+  if(!types.length)g+=`<text x="${W/2}" y="${H/2}" text-anchor="middle" font-size="13" fill="var(--muted)">No frames in the last 72 hours yet</text>`;
+  $('#frameChart').innerHTML=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Frames received over 72 hours">${g}</svg>`;
+  $('#frameLegend').innerHTML=types.map(t=>`<span><i style="background:${typeColor(t)}"></i>${esc(t)}</span>`).join('')+(PASSES&&PASSES.passes&&PASSES.passes.length?'<span><i style="background:var(--accent);opacity:.25;border-radius:2px"></i>Pass over your station</span>':'');
+}
+function mergedLog(now){return LOG.map(e=>({t:e.t,type:KIND_TYPE[e.kind]||'OPERATOR',by:e.cs,msg:e.msg,e})).concat(D.sys.filter(s=>s.t<=now).map(s=>({...s,by:'system'}))).sort((a,b)=>a.t-b.t)}
+let lastRecentSig='';
+function renderRecent(now){const all=mergedLog(now);const sig=all.length+':'+(all.length?all[all.length-1].t:0);if(sig===lastRecentSig)return;lastRecentSig=sig;
+  $('#recent').innerHTML=all.slice(-8).reverse().map(e=>`<li><span class="mono">${fmtHM(e.t)}</span><span class="tag ${e.type}">${e.type}</span><span>${e.by!=='system'?`<b>${esc(e.by)}</b> `:''}${esc(e.msg)}</span></li>`).join('');
+  $('#logCount').textContent=' '+LOG.length;if(tab==='log')renderLog()}
+function renderLog(){const f=$('#logFilter').value,rows=mergedLog(Date.now()).filter(e=>!f||e.type===f).slice(-800).reverse();
+  $('#logBody').innerHTML=rows.map(r=>`<tr><td class="mono">${fmtDT(r.t)}</td><td><span class="tag ${r.type}">${r.type}</span></td><td class="mono">${esc(r.by)}</td><td class="msg">${esc(r.msg)}</td><td class="mono" ${r.e?`title="#${r.e.seq} ${esc(r.e.hash)}"`:''}>${r.e?'#'+r.e.seq+' '+esc(r.e.hash.slice(0,10)):'<span class="note">derived</span>'}</td></tr>`).join('')||'<tr><td colspan="5" class="empty">No entries match.</td></tr>'}
+function renderContext(now){
+  const parts=[`<span>On duty: <b>${CFG.duty?esc(CFG.duty.cs):'nobody signed on'}</b>${CFG.duty?' since '+fmtDT(CFG.duty.t):''}</span>`];
+  if(HEALTH){const next=HEALTH.last_attempt_ms?HEALTH.last_attempt_ms+CONF.poll_minutes*MIN:null;parts.push(`<span>Last fetch ${HEALTH.last_attempt_ms?ago(now-HEALTH.last_attempt_ms)+' ago':'never'}${next&&next>now?` · next in about ${Math.ceil((next-now)/MIN)} min`:''}</span>`,`<button class="btn sm" id="fetchNow" ${HEALTH.fetching?'disabled':''}>${HEALTH.fetching?'Fetching…':'Fetch now'}</button>`)}
+  $('#context').innerHTML=parts.join('');
+  const lb=$('#livebar');lb.classList.toggle('down',!online);$('#liveText').textContent=online?`Live · ${CONF.satellite.name} via SatNOGS`:'Lost contact with the Pi · retrying';
+  const sb=$('#setupBanner');
+  if(HEALTH&&!HEALTH.token_present){sb.hidden=false;sb.className='banner crit';sb.innerHTML='<b>One step left:</b> put your SatNOGS DB API key in <code>secrets/satnogs_token</code> on the Pi, then press Fetch now. Get the key at db.satnogs.org → your avatar → Settings / API Token.'}
+  else if(PASSES&&PASSES.note&&/latitude/.test(PASSES.note)){sb.hidden=false;sb.className='banner warn';sb.textContent='Set your station latitude and longitude in config.toml and restart the server to see passes over you.'}
+  else sb.hidden=true;
+}
+
+/* ---------- frames tab ---------- */
+let frameRows=[],openFrame=null;
+async function loadFrames(older){
+  const before=older&&frameRows.length?frameRows[frameRows.length-1].t:Date.now()+HOUR;
+  try{const rows=await api('/api/frames?limit=100&before='+before);frameRows=older?frameRows.concat(rows):rows;$('#olderFrames').hidden=rows.length<100;renderFrames()}catch(e){}
+}
+function txf(c,x){switch(c.transform){case 'scale':return x*(c.scale??1)+(c.offset??0);case 'mv_auto':return Math.abs(x)>100?x/1000:x;case 'kelvin_auto':return (x>1000?x/10:x)-273.15;case 's_to_h':return x/3600;default:return x}}
+function keyVals(f){return CH.map(c=>{for(const fld of (c.fields||[c.field]))if(typeof f.fields[fld]==='number')return {c,v:fv(c,txf(c,f.fields[fld]))};return null}).filter(Boolean).slice(0,4)}
+function renderFrames(){
+  const types=[...new Set(frameRows.map(f=>f.type))],sel=$('#frameFilter'),cur=sel.value;
+  sel.innerHTML='<option value="">All frames</option>'+types.map(t=>`<option${t===cur?' selected':''}>${esc(t)}</option>`).join('');
+  const rows=frameRows.filter(f=>!cur||f.type===cur);
+  $('#frameBody').innerHTML=rows.map(f=>`<tr class="fr" data-frame="${f.id}"><td class="mono">${fmtDT(f.t)}</td><td>${esc(f.observer||'—')}</td><td><span class="pill ${f.ok?'acc':''}">${esc(f.type)}</span></td><td class="mono" style="white-space:normal">${keyVals(f).map(k=>`${esc(k.c.name)} <b>${esc(k.v)}</b>`).join(' · ')||'<span class="note">—</span>'}</td></tr>`+
+    (openFrame===f.id?`<tr><td colspan="4"><div class="fields">${Object.entries(f.fields).map(([k,v])=>`<div><span>${esc(k)}</span> ${esc(v)}</div>`).join('')||'<div><span>No decoded fields</span></div>'}</div><div class="hex">${esc(f.hex)}</div></td></tr>`:'')).join('')||'<tr><td colspan="4" class="empty">No frames stored yet.</td></tr>';
+}
+
+/* ---------- passes tab ---------- */
+function renderPasses(now){
+  const P=PASSES;$('#passNote').textContent=P?(P.note||`${P.station.name} · ${P.station.lat.toFixed(2)}, ${P.station.lon.toFixed(2)} · min ${P.station.min_elevation}°`+(P.tle_epoch_ms?` · orbit data ${ago(now-P.tle_epoch_ms)} old`:'')):'';
+  const rows=P&&P.passes?P.passes.filter(p=>p.los>now):[];
+  $('#passBody').innerHTML=rows.map(p=>`<tr><td class="mono">${fmtDT(p.aos)}</td><td class="mono">${fmtHM(p.los)}</td><td class="mono">${Math.round((p.los-p.aos)/MIN)} min</td><td class="mono">${p.max_el}°</td><td class="mono">${p.az_aos}°</td><td class="mono">${p.az_los}°</td><td class="mono">${p.aos<=now?'<span class="pill ok">Up now</span>':dur(p.aos-now)}</td></tr>`).join('')||`<tr><td colspan="7" class="empty">${esc((P&&P.note)||'No passes above the minimum elevation in the next 36 hours.')}</td></tr>`;
+  const st={};for(const f of FRAMES){if(f[1]<now-7*DAY)continue;const s=st[f[2]||'unknown']||(st[f[2]||'unknown']={n:0,ok:0,last:0});s.n++;s.ok+=f[4];s.last=Math.max(s.last,f[1])}
+  $('#stationBody').innerHTML=Object.entries(st).sort((a,b)=>b[1].last-a[1].last).map(([k,s])=>`<tr><td>${esc(k)}</td><td class="mono">${s.n}</td><td class="mono">${s.ok}</td><td class="mono">${fmtDT(s.last)} (${ago(now-s.last)} ago)</td></tr>`).join('')||'<tr><td colspan="4" class="empty">No stations yet.</td></tr>';
+}
+
+/* ---------- drawer ---------- */
+let drawerCh=null;
+function openDrawer(id){if(!CHM[id])return;drawerCh=id;$('#scrim').hidden=false;renderDrawer(true);setTimeout(()=>$('#drClose')?.focus(),0)}
+function closeDrawer(){const id=drawerCh;drawerCh=null;$('#scrim').hidden=true;document.getElementById('r-'+id)?.focus()}
+function chartSVG(c,now){
+  const ser=(SERIES[c.id]||[]).filter(p=>p[0]>=now-7*DAY);if(ser.length<1)return '<p class="note">No samples in the last 7 days.</p>';
+  const L=limitsAt(c.id,now).lim;let lo=Math.min(...ser.map(p=>p[1])),hi=Math.max(...ser.map(p=>p[1]));
+  if(L){L.filter(v=>v!=null).forEach(v=>{const span=Math.max(hi-lo,1);if(v>=lo-span&&v<=hi+span){lo=Math.min(lo,v);hi=Math.max(hi,v)}})}
+  if(hi-lo<1e-6){lo-=1;hi+=1}const pd=(hi-lo)*.08;lo-=pd;hi+=pd;
+  const W=740,H=250,L0=52,R0=10,T0=12,B0=26,ws=now-7*DAY,X=t=>L0+(t-ws)/(now-ws)*(W-L0-R0),Y=v=>T0+(hi-v)/(hi-lo)*(H-T0-B0);let g='';
+  if(L){const [rl,yl,yh,rh]=L;const band=(a,b,col)=>{a=Math.max(a,lo);b=Math.min(b,hi);if(b>a)g+=`<rect x="${L0}" y="${Y(b).toFixed(1)}" width="${W-L0-R0}" height="${(Y(a)-Y(b)).toFixed(1)}" fill="${col}" fill-opacity=".12"/>`};
+    if(rh!=null)band(rh,hi,'var(--crit)');if(yh!=null)band(yh,rh??hi,'var(--warn)');if(rl!=null)band(lo,rl,'var(--crit)');if(yl!=null)band(rl??lo,yl,'var(--warn)')}
+  for(let i=0;i<=4;i++){const v=lo+(hi-lo)*i/4,y=Y(v);g+=`<line x1="${L0}" x2="${W-R0}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" stroke="var(--line)"/><text x="${L0-6}" y="${(y+3.5).toFixed(1)}" text-anchor="end" font-size="10.5" font-family="IBM Plex Mono,monospace" fill="var(--muted)">${v.toFixed(Math.min(c.dp,2))}</text>`}
+  for(let d=Math.ceil(ws/DAY)*DAY;d<now;d+=DAY){const x=X(d);g+=`<line x1="${x}" x2="${x}" y1="${T0}" y2="${H-B0}" stroke="var(--line)" stroke-dasharray="2 3"/><text x="${x}" y="${H-8}" text-anchor="middle" font-size="10.5" font-family="IBM Plex Mono,monospace" fill="var(--muted)">${fmtD(d).slice(5)}</text>`}
+  let run=[];const flush=()=>{if(run.length>1)g+=`<polyline points="${run.join(' ')}" fill="none" stroke="var(--accent)" stroke-width="1.5"/>`;run=[]};let prev=null;
+  for(const [t,v] of ser){if(prev!=null&&t-prev>45*MIN)flush();run.push(X(t).toFixed(1)+','+Y(v).toFixed(1));prev=t}flush();
+  ser.forEach(([t,v])=>{g+=`<circle cx="${X(t).toFixed(1)}" cy="${Y(v).toFixed(1)}" r="2.4" fill="var(--accent)"><title>${fmtDT(t)} · ${fv(c,v)}</title></circle>`});
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(c.name)} over 7 days">${g}</svg>`;
+}
+function renderDrawer(full){
+  if(!drawerCh)return;const c=CHM[drawerCh],now=Date.now(),s=chState(c,now),L=limitsAt(c.id,now),ser=(SERIES[c.id]||[]).filter(p=>p[0]>=now-7*DAY).map(p=>p[1]);
+  if(full){
+    $('#drawer').innerHTML=`<div class="dr-head"><div class="stack" style="gap:4px"><span class="label">${esc(c.sub)} · ${esc((c.fields||[c.field]).join(', '))}</span><h3 id="drTitle">${esc(c.name)}</h3></div><button class="btn" id="drClose">Close</button></div>
+     <div class="dr-now" id="drNow"></div>
+     <div class="stack" style="gap:6px"><span class="label">Last 7 days · shaded bands are caution and alarm zones</span><div class="chartbox" style="padding:0" id="drChart"></div></div>
+     <div class="stats" id="drStats"></div>
+     <div class="panel"><div class="ph"><h2>Limits</h2><span class="sub" id="drLimBy"></span></div><form class="pb stack" id="limForm">
+       <div class="limform">${['Alarm low','Caution low','Caution high','Alarm high'].map((n,i)=>`<label><span class="label">${n}</span><input id="lim${i}" inputmode="decimal" placeholder="none" value="${L.lim&&L.lim[i]!=null?L.lim[i]:''}"></label>`).join('')}</div>
+       <input class="txt" id="limReason" maxlength="160" placeholder="Reason for the change (required)">
+       <div class="row"><button class="btn primary" type="submit">Save limits</button><span class="note">Default: ${limTxt(c.lim)} ${esc(c.unit)}. Changes apply from now on and are signed in the log.</span></div>
+     </form></div>
+     <div class="panel"><div class="ph"><h2>Alerts on this channel</h2></div><div class="alerts" id="drAlerts"></div></div>`;
+  }
+  $('#drNow').innerHTML=`<span class="big">${s.v==null?'—':(+s.v).toFixed(c.dp)}</span><span class="mono" style="color:var(--muted)">${esc(c.unit)}</span><span class="pill ${ST_CLASS[s.st]}">${ST_LABEL[s.st]}</span><span class="note">${s.at?'From frame at '+fmtDT(s.at)+', '+ago(now-s.at)+' ago':'No samples yet'}</span>`;
+  $('#drChart').innerHTML=chartSVG(c,now);
+  $('#drStats').innerHTML=(ser.length?[['Samples (7 d)',ser.length,0],['Minimum',Math.min(...ser),c.dp],['Maximum',Math.max(...ser),c.dp],['Mean',ser.reduce((a,b)=>a+b,0)/ser.length,c.dp]]:[]).map(([l,v,dp])=>`<div><span class="label">${l}</span><span class="mono">${(+v).toFixed(dp)}${dp||l!=='Samples (7 d)'?' '+esc(c.unit):''}</span></div>`).join('');
+  $('#drLimBy').textContent=L.by?`Last changed by ${L.by.cs}, ${fmtDT(L.by.t)}`:'Using defaults from the channels file';
+  const rel=D.alerts.filter(a=>a.ch===c.id).slice(-6).reverse();
+  $('#drAlerts').innerHTML=rel.length?rel.map(a=>`<div class="alert"><span class="pill ${a.event?'acc':a.sev}">${a.event?'Event':a.sev==='crit'?'Alarm':'Caution'}</span><span class="msg">${esc(a.msg)}</span><span></span><span class="meta">Raised ${fmtDT(a.raised)}${a.event?'':a.cleared?' · cleared '+fmtDT(a.cleared):' · active'}</span></div>`).join(''):'<div class="empty">No alerts on this channel since the console was commissioned.</div>';
+}
+
+/* ---------- handover ---------- */
+function handoverText(now,AV){
+  const L=[],P=s=>L.push(s),start=CFG.duty?CFG.duty.t:now-8*HOUR,ld=[...FRAMES].reverse().find(f=>f[4]);
+  const flagged=CH.map(c=>({c,s:chState(c,now)})).filter(x=>['warn','crit','stale'].includes(x.s.st));
+  const inShift=FRAMES.filter(f=>f[1]>=start);
+  P(`DOWNLINK DESK SHIFT HANDOVER · ${CONF.satellite.name} (NORAD ${CONF.satellite.norad}) · data via SatNOGS`);
+  P(`Shift     ${fmtD(start)} ${fmtHM(start)} → ${fmtHM(now)} (${ago(now-start)})`);
+  P(`Outgoing  ${CFG.duty?CFG.duty.cs:(CS||'(no call sign)')}   Prepared by ${CS||'(no call sign)'}`);
+  P('');P('DATA');
+  P(`  Latest decoded frame ${ld?fmtDT(ld[1])+' ('+ago(now-ld[1])+' ago) from '+(ld[2]||'unknown'):'none'}`);
+  P(`  This shift: ${inShift.length} frames (${inShift.filter(f=>f[4]).length} decoded) from ${new Set(inShift.map(f=>f[2])).size} station(s)`);
+  if(HEALTH)P(`  Fetcher: last success ${HEALTH.last_ok_ms?fmtDT(HEALTH.last_ok_ms):'never'}${HEALTH.fetches[0]&&!HEALTH.fetches[0].ok?' · last attempt failed: '+HEALTH.fetches[0].message:''}`);
+  P('');P('SPACECRAFT (latest values)');
+  CH.forEach(c=>{const s=chState(c,now);if(s.v!=null)P(`  ${c.name.padEnd(34)} ${(+s.v).toFixed(c.dp)} ${c.unit}  (${ago(now-s.at)} old)${s.st!=='ok'?'  ['+ST_LABEL[s.st].toUpperCase()+']':''}`)});
+  if(!flagged.length)P('  Nothing off-nominal against this console’s limits.');
+  P('');P(`OPEN ALERTS (${AV.open.length})`);if(!AV.open.length)P('  None.');
+  AV.open.forEach(a=>P(`  - [${a.event?'EVENT':a.sev==='crit'?'ALARM':'CAUTION'}] ${a.msg} · raised ${fmtDT(a.raised)} · ${a.ack?'acked '+a.ack.cs:'NOT ACKNOWLEDGED'}`));
+  if(AV.shelved.length){P(`  Shelved (${AV.shelved.length}):`);AV.shelved.forEach(a=>P(`    - ${a.msg} · ${a.shelved.cs} until ${fmtDT(a.shelved.until)}: ${a.shelved.reason}`))}
+  const lims=CH.filter(c=>limitsAt(c.id,now).by);if(lims.length){P('');P('NON-DEFAULT LIMITS');lims.forEach(c=>{const l=limitsAt(c.id,now);P(`  - ${c.name}: ${limTxt(l.lim)} (${l.by.cs}, ${fmtDT(l.by.t)})`)})}
+  const np=PASSES&&PASSES.passes?PASSES.passes.filter(p=>p.los>now).slice(0,3):[];if(np.length){P('');P('NEXT PASSES OVER THE STATION');np.forEach(p=>P(`  - ${fmtDT(p.aos)} → ${fmtHM(p.los)}  max ${p.max_el}°`))}
+  P('');P('NOTES');const nt=($('#hoNotes').value||'').trim();P(nt?nt.split('\n').map(s=>'  '+s).join('\n'):'  (none)');
+  P('');P(`Log head #${LOG.length?LOG[LOG.length-1].seq:0} ${LOG.length?LOG[LOG.length-1].hash.slice(0,16):''}`);
+  return L.join('\n');
+}
+function renderHandover(){const now=Date.now();$('#hoText').value=handoverText(now,alertView(now));$('#dutyNote').textContent=CFG.duty?`On duty: ${CFG.duty.cs} since ${fmtDT(CFG.duty.t)}`:'Nobody is signed on'}
+async function sha256hex(s){try{if(crypto.subtle){const b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s));return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('')}}catch(e){}let h=0x811c9dc5;for(let i=0;i<s.length;i++)h=Math.imul(h^s.charCodeAt(i),16777619)>>>0;return 'fnv-'+h.toString(16)}
+
+/* ---------- about ---------- */
+function renderAbout(){
+  const s=CONF.satellite,sat=(HEALTH&&HEALTH.satellite)||{};$$('.satname').forEach(e=>e.textContent=s.name);
+  $('#satCredit').innerHTML=sat.website?`${esc(s.name)} is operated by its own team; see <a href="${esc(sat.website)}" target="_blank" rel="noopener">${esc(sat.website)}</a>.`:'';
+  $('#specNote').textContent=CONF.spec.notes||'';
+  $('#specBody').innerHTML=CH.map(c=>`<tr><td>${esc(c.name)}</td><td class="mono">${esc((c.fields||[c.field]).join(', '))}</td><td class="mono">${esc(c.transform||'none')}</td><td class="mono">${esc(c.unit)}</td><td class="mono">${limTxt(c.lim)}</td></tr>`).join('');
+  $('#sysKv').innerHTML=[['Satellite',`${s.name} · NORAD ${s.norad} · decoder ${s.decoder}`],['SatNOGS status',sat.status||'—'],['Station',`${CONF.station.name} (${CONF.station.lat}, ${CONF.station.lon})`],['Fetch interval',CONF.poll_minutes+' min'],['Downlink Desk',CONF.version],['Commissioned',CONF.commissioned_ms?fmtDT(CONF.commissioned_ms):'—']].map(([k,v])=>`<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('');
+}
+
+/* ---------- sound ---------- */
+let actx=null,heard=new Set(),primed=false;
+function beep(){if(!actx)return;try{const t=actx.currentTime;[0,.22].forEach(d=>{const o=actx.createOscillator(),g=actx.createGain();o.type='square';o.frequency.value=880;g.gain.value=.04;o.connect(g).connect(actx.destination);o.start(t+d);o.stop(t+d+.14)})}catch(e){}}
+function soundCheck(AV){let fresh=false;AV.open.filter(a=>!a.ack&&a.sev==='crit').forEach(a=>{if(!heard.has(a.id)){heard.add(a.id);fresh=true}});if(fresh&&primed&&SOUND)beep();primed=true}
+
+/* ---------- main render ---------- */
+let AV_cache={open:[],shelved:[],closed:[]};
+function refresh(force){
+  if(!CONF)return;const now=Date.now();D=derive(now);const AV=alertView(now);AV_cache=AV;
+  $('#utc').textContent=fmtT(now);$('#date').textContent=fmtD(now);
+  renderStrip(now,AV);renderTlm(now);renderAlerts(AV);renderProc(now);renderEquip(now);renderRecent(now);renderContext(now);soundCheck(AV);
+  if(force||tick%4===0)renderFrameChart(now);
+  if(tab==='passes')renderPasses(now);
+  if(drawerCh)renderDrawer(false);
+}
+let tick=0;
+
+/* ---------- data loading ---------- */
+function addTelemetry(j){
+  for(const [t,ch,v] of j.points){const s=SERIES[ch]||(SERIES[ch]=[]);if(!s.length||t>s[s.length-1][0])s.push([t,v]);else if(!s.some(p=>p[0]===t)){s.push([t,v]);s.sort((a,b)=>a[0]-b[0])}lastPointT=Math.max(lastPointT,t)}
+  for(const f of j.frames){if(!FRAME_IDS.has(f[0])){FRAME_IDS.add(f[0]);FRAMES.push(f)}}
+  FRAMES.sort((a,b)=>a[1]-b[1]);
+}
+async function poll(kind){
+  try{
+    if(kind==='tel'){const since=FRAMES.length?Math.max(0,FRAMES[FRAMES.length-1][1]-DAY):Date.now()-8*DAY;addTelemetry(await api('/api/telemetry?since='+since))}
+    if(kind==='log'){const after=LOG.length?LOG[LOG.length-1].seq:0;const add=await api('/api/log?after='+after);if(add.length){LOG.push(...add);buildCfg()}}
+    if(kind==='health')HEALTH=await api('/api/health');
+    if(kind==='passes')PASSES=await api('/api/passes?hours=36');
+    if(kind==='notes'&&document.activeElement!==$('#hoNotes')){NOTES=await api('/api/notes');if($('#hoNotes').value!==NOTES.text)$('#hoNotes').value=NOTES.text}
+    online=true;
+  }catch(e){if(!e.status)online=false}
+}
+async function boot(){
+  try{CONF=await api('/api/config')}catch(e){$('#liveText').textContent='Could not reach the Downlink Desk server on this Pi';$('#livebar').classList.add('down');setTimeout(boot,5000);return}
+  CH=CONF.spec.channels||[];CHM=Object.fromEntries(CH.map(c=>[c.id,c]));online=true;
+  $('#sub').textContent=`${CONF.satellite.name} · NORAD ${CONF.satellite.norad} · live data from the SatNOGS network`;
+  $('#passFld').hidden=!CONF.write_protected;
+  buildTlm();
+  await Promise.all(['tel','log','health','passes','notes'].map(poll));
+  renderAbout();refresh(true);if(tab!=='console')showTab(tab);
+  setInterval(()=>{tick++;refresh(false)},1000);
+  setInterval(()=>poll('tel'),60000);setInterval(()=>poll('log'),10000);setInterval(()=>poll('health'),20000);
+  setInterval(()=>poll('passes'),600000);setInterval(()=>poll('notes'),15000);
+}
+
+/* ---------- events ---------- */
+function showTab(t){tab=t;$$('nav.tabs button').forEach(b=>b.setAttribute('aria-selected',b.dataset.tab===t));['console','frames','passes','log','handover','about'].forEach(x=>$('#tab-'+x).hidden=x!==t);
+  if(t==='log')renderLog();if(t==='handover')renderHandover();if(t==='passes')renderPasses(Date.now());if(t==='frames')loadFrames(false);if(t==='about')renderAbout();savePrefs()}
+$('nav.tabs').addEventListener('click',e=>{const b=e.target.closest('button');if(b)showTab(b.dataset.tab)});
+document.addEventListener('click',async e=>{
+  const T=e.target;let el;
+  if((el=T.closest('[data-goto]')))showTab(el.dataset.goto);
+  if((el=T.closest('[data-chlink]'))){e.preventDefault();openDrawer(el.dataset.chlink);return}
+  if((el=T.closest('tr[data-ch]'))){openDrawer(el.dataset.ch);return}
+  if((el=T.closest('tr[data-frame]'))){const id=+el.dataset.frame;openFrame=openFrame===id?null:id;renderFrames();return}
+  if((el=T.closest('[data-ack]'))){const a=D.alerts.find(x=>x.id===el.dataset.ack);if(a)act('ack',{alert:a.id,sev:a.sev},`Acknowledged ${a.event?'event':a.sev==='crit'?'ALARM':'CAUTION'}: ${a.msg}`)}
+  if(T.closest('#ackAll')){for(const a of alertView(Date.now()).open.filter(a=>!a.ack))if(!await act('ack',{alert:a.id,sev:a.sev},`Acknowledged ${a.event?'event':a.sev==='crit'?'ALARM':'CAUTION'}: ${a.msg}`))break}
+  if((el=T.closest('[data-shelve]'))){if(!requireCs())return;shelveOpen=el.dataset.shelve;lastAlertSig='';refresh();$('#shelfReason')?.focus()}
+  if(T.closest('[data-shelfcancel]')){shelveOpen=null;lastAlertSig='';refresh()}
+  if((el=T.closest('[data-unshelve]')))act('unshelve',{key:el.dataset.unshelve},`Unshelved alerts for ${el.dataset.unshelve}.`);
+  if((el=T.closest('[data-step]'))&&!el.disabled)act('check',{day:el.dataset.day,step:el.dataset.step},`Daily check ${el.dataset.day}: ${PROC.find(p=>p[0]===el.dataset.step)[1]}.`);
+  if(T.closest('[data-eqcancel]')){eqPending=null;$('#equip').dataset.sig='';refresh()}
+  if(T.closest('#fetchNow')){try{const r=await api('/api/fetch',{method:'POST',body:{}});toast(r.message);setTimeout(()=>poll('health'),1500);setTimeout(()=>{poll('tel');poll('health')},25000)}catch(err){toast(err.body&&err.body.message?err.body.message:'Could not start a fetch: '+err.message)}}
+  if(T.closest('#drClose')||T===$('#scrim'))closeDrawer();
+});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&drawerCh){closeDrawer();return}
+  if((e.key==='Enter'||e.key===' ')&&e.target.matches&&e.target.matches('tr[data-ch]')){e.preventDefault();openDrawer(e.target.dataset.ch)}});
+document.addEventListener('submit',async e=>{
+  e.preventDefault();const f=e.target;
+  if(f.dataset.shelf){const reason=$('#shelfReason').value.trim();if(!reason){toast('Give a reason so the next operator knows why this alert is hidden.');$('#shelfReason').focus();return}
+    const a=D.alerts.find(x=>x.id===f.dataset.shelf);if(!a)return;const mins=+$('#shelfDur').value;
+    if(await act('shelve',{key:a.key,until:Date.now()+mins*MIN,reason},`Shelved “${a.msg}” for ${ago(mins*MIN)}: ${reason}`)){shelveOpen=null;lastAlertSig='';refresh()}}
+  if(f.dataset.eqform){const eq=MANUAL_EQ.find(x=>x.id===f.dataset.eqform),note=$('#eqNote').value.trim(),prev=eqAt(eq.id).status,st=eqPending.status;
+    if(await act('equip',{eq:eq.id,status:st,note},`${eq.name}: ${prev} → ${st}${note?' ('+note+')':''}.`)){eqPending=null;$('#equip').dataset.sig='';refresh()}}
+  if(f.id==='limForm'){const c=CHM[drawerCh],vals=[0,1,2,3].map(i=>{const s=$('#lim'+i).value.trim();return s===''?null:Number(s)});
+    if(vals.some(v=>v!==null&&!isFinite(v))){toast('Limits must be numbers, or blank for none.');return}
+    const nn=vals.filter(v=>v!=null);for(let i=1;i<nn.length;i++)if(nn[i]<=nn[i-1]){toast('Limits must increase from alarm low to alarm high.');return}
+    const reason=$('#limReason').value.trim();if(!reason){toast('Give a reason for the limit change.');$('#limReason').focus();return}
+    const old=limitsAt(c.id,Date.now()).lim;if(await act('limits',{ch:c.id,lim:vals},`Limits for ${c.name} changed from ${limTxt(old)} to ${limTxt(vals.every(v=>v==null)?null:vals)} ${c.unit}: ${reason}`)){$('#limReason').value='';toast('Limits saved and signed.');renderDrawer(true)}}
+  if(f.id==='noteForm'){const v=$('#noteIn').value.trim();if(v&&await act('note',{},v))$('#noteIn').value=''}
+});
+$('#equip').addEventListener('change',e=>{const s=e.target.closest('select[data-eq]');if(!s)return;if(!requireCs()){$('#equip').dataset.sig='';refresh();return}
+  eqPending=s.value===eqAt(s.dataset.eq).status?null:{id:s.dataset.eq,status:s.value};$('#equip').dataset.sig='';refresh()});
+$('#cs').addEventListener('change',e=>{CS=e.target.value.trim().replace(/\s+/g,' ').slice(0,16);e.target.value=CS;savePrefs()});
+$('#pass').addEventListener('change',e=>{PASS=e.target.value;savePrefs()});
+$('#sound').addEventListener('click',()=>{SOUND=!SOUND;if(SOUND){try{actx=actx||new (window.AudioContext||window.webkitAudioContext)();actx.resume();beep()}catch(e){}}const b=$('#sound');b.setAttribute('aria-pressed',SOUND);b.textContent=SOUND?'On':'Off';savePrefs()});
+$('#logFilter').addEventListener('change',renderLog);
+$('#frameFilter').addEventListener('change',renderFrames);
+$('#olderFrames').addEventListener('click',()=>loadFrames(true));
+$('#verify').addEventListener('click',async()=>{const o=$('#verifyOut');o.className='verify';o.textContent='Checking…';try{const v=await api('/api/log/verify');o.className='verify '+(v.ok?'ok':'bad');o.textContent=v.ok?`Chain intact · ${v.entries} signed entries · head ${v.head.slice(0,16)}`:'Problems found: '+v.problems.map(p=>`#${p.seq} ${p.problem}`).join('; ')}catch(e){o.className='verify bad';o.textContent='Could not verify: '+e.message}});
+$('#hoCopy').addEventListener('click',()=>{renderHandover();const t=$('#hoText');const done=()=>toast('Handover report copied.');try{navigator.clipboard.writeText(t.value).then(done,()=>{t.select();document.execCommand('copy');done()})}catch(e){t.select();document.execCommand('copy');done()}});
+let notesT=null;$('#hoNotes').addEventListener('input',()=>{$('#hoText').value=handoverText(Date.now(),alertView(Date.now()));clearTimeout(notesT);notesT=setTimeout(()=>api('/api/notes',{method:'POST',body:{text:$('#hoNotes').value,cs:CS}}).catch(e=>{if(e.status===401)toast('Notes need the operator passcode.')}),1200)});
+$('#hoSign').addEventListener('click',async()=>{if(!requireCs())return;const nx=$('#hoNext').value.trim().slice(0,16);if(!nx){toast("Enter the incoming operator's call sign.");$('#hoNext').focus();return}
+  const now=Date.now(),AV=alertView(now),txt=handoverText(now,AV),un=AV.open.filter(a=>!a.ack).length,notes=$('#hoNotes').value.trim(),from=CFG.duty?CFG.duty.cs:CS;
+  if(await act('handover',{from,to:nx,report:await sha256hex(txt),unacked:un},`Handover signed: ${from} → ${nx}. ${un} unacknowledged alert${un===1?'':'s'} passed on.${notes?' Notes: '+notes.replace(/\s+/g,' ').slice(0,600):''}`)){
+    $('#hoNext').value='';$('#hoNotes').value='';api('/api/notes',{method:'POST',body:{text:'',cs:CS}}).catch(()=>{});renderHandover();toast(`Handover recorded. ${nx} is on duty.`)}});
+$('#takeDuty').addEventListener('click',async()=>{if(await act('duty',{},`${CS} took the console.`)){renderHandover();toast('You are on duty.')}});
+
+$('#cs').value=CS;$('#pass').value=PASS;$('#sound').setAttribute('aria-pressed',SOUND);$('#sound').textContent=SOUND?'On':'Off';
+boot();
+})();
+</script>
+</body>
+</html>
