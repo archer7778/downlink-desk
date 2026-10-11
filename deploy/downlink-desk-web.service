@@ -1,0 +1,15 @@
+[Unit]
+Description=Downlink Desk console web server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=@USER@
+WorkingDirectory=@ROOT@
+Environment=DOWNLINK_DESK_CONFIG=@ROOT@/config.toml
+ExecStart=@ROOT@/.venv/bin/python -m downlink_desk.server
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
