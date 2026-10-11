@@ -1,0 +1,12 @@
+[Unit]
+Description=Downlink Desk: fetch new telemetry from SatNOGS
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=@USER@
+WorkingDirectory=@ROOT@
+Environment=DOWNLINK_DESK_CONFIG=@ROOT@/config.toml
+ExecStart=@ROOT@/.venv/bin/python -m downlink_desk.fetch
+Nice=10

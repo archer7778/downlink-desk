@@ -1,0 +1,11 @@
+[Unit]
+Description=Fetch SatNOGS telemetry on a schedule
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=30min
+RandomizedDelaySec=90
+Persistent=true
+
+[Install]
+WantedBy=timers.target
