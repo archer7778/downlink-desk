@@ -485,14 +485,21 @@ def make_handler(app):
                             "WHERE id>? ORDER BY id LIMIT 300", (last_f,)).fetchall()
                         fxs = app.conn.execute("SELECT * FROM fetches WHERE id>? ORDER BY id", (last_x,)).fetchall()
                         att = dbm.meta_get(app.conn, "last_attempt_ms", 0)
+                    hist_n, hist_old = 0, None
                     for r in frs:
                         last_f = r["id"]
                         if r["norad"] not in names:
                             names[r["norad"]] = str(r["norad"])
+                        if r["fetched_ms"] - r["ts_ms"] > 6 * 3600_000:   # filled-in history, not news
+                            hist_n += 1
+                            hist_old = r["ts_ms"] if hist_old is None else min(hist_old, r["ts_ms"])
+                            continue
                         self._event("frame", {"id": r["id"], "norad": r["norad"], "sat": names.get(r["norad"]),
                                               "t": r["ts_ms"], "stored": r["fetched_ms"], "observer": r["observer"],
                                               "type": r["frame_type"], "ok": bool(r["decoded_ok"]), "sunlit": r["sunlit"],
                                               "lat": r["sub_lat"], "lon": r["sub_lon"], "saa": in_saa(r["sub_lat"], r["sub_lon"])})
+                    if hist_n:
+                        self._event("history", {"n": hist_n, "oldest": hist_old})
                     for r in fxs:
                         last_x = r["id"]
                         self._event("fetch", {"t": r["t_ms"], "ok": bool(r["ok"]), "message": r["message"],
