@@ -116,7 +116,7 @@ def scheduled_observations(network_api, norad):
         try:
             data = c._get(f"{c.api}/observations/", {"norad_cat_id": norad, "status": "future", "format": "json",
                                                        "page": page})
-        except Refused:
+        except (Refused, AuthError):
             if page == 1:
                 raise
             break

@@ -62,8 +62,8 @@ def refresh_observations(conn, cfg, norad, log):
     dbm.smeta_set(conn, norad, "obs_refreshed_ms", dbm.now_ms())
     try:
         obs, complete = satnogs.scheduled_observations(cfg["satnogs"]["network_api"], norad)
-    except satnogs.Refused as e:
-        log(f"[{norad}] Could not load scheduled observations: {e}")
+    except Exception as e:   # the schedule is useful but optional; never let it stop a fetch
+        log(f"[{norad}] Could not load scheduled observations: {type(e).__name__}: {e}")
         return
     now = dbm.now_ms()
     conn.executemany(
