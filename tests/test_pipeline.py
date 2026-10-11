@@ -41,7 +41,7 @@ def test_pipeline():
         cfg = make_cfg(tmp, 8766)
         msgs = []
         assert fetch.run(cfg, force=True, log=msgs.append) == 0, msgs
-        conn = dbm.connect(cfg.db_path)
+        conn = dbm.open_db(cfg)
         n = conn.execute("SELECT COUNT(*) FROM frames").fetchone()[0]
         ok = conn.execute("SELECT COUNT(*) FROM frames WHERE decoded_ok=1").fetchone()[0]
         pts = conn.execute("SELECT COUNT(*) FROM points").fetchone()[0]
@@ -64,13 +64,13 @@ def test_pipeline():
         assert not v["ok"] and v["problems"][0]["seq"] == 1
         # pass prediction runs on the mock TLE
         from downlink_desk.orbit import passes
-        tle = dbm.meta_get(conn, "tle")
+        tle = dbm.smeta_get(conn, 60237, "tle")
         p = passes(tle["tle1"], tle["tle2"], dbm.now_ms(), 24, 10.82, 106.63)
         print("passes next 24h:", len(p))
         assert len(p) >= 2
         # scheduled observations were loaded and scored against the frames
         from downlink_desk.analysis import observation_report, silent_streak
-        rep = observation_report(conn, cfg, 0, dbm.now_ms())
+        rep = observation_report(conn, cfg, 0, dbm.now_ms(), 60237)
         st = {}
         for o in rep:
             st[o["status"]] = st.get(o["status"], 0) + 1
@@ -108,8 +108,8 @@ def test_pipeline():
         threading.Thread(target=ns.serve_forever, daemon=True).start()
         cfg.data["notify"] = {"ntfy_topic": "dd-test", "ntfy_server": "http://127.0.0.1:8767", "console_url": ""}
         t0 = dbm.now_ms()
-        conn.execute("INSERT INTO frames(id,ts_ms,frame_hex,decoded_ok,fetched_ms) VALUES(900001,?,'00',1,?)", (t0, t0))
-        conn.execute("INSERT INTO points VALUES(?, 'uhf_boots', 999, 900001)", (t0,))
+        conn.execute("INSERT INTO frames(id,ts_ms,frame_hex,decoded_ok,fetched_ms,norad) VALUES(900001,?,'00',1,?,60237)", (t0, t0))
+        conn.execute("INSERT INTO points(ts_ms,channel,value,frame_id,norad) VALUES(?, 'uhf_boots', 999, 900001, 60237)", (t0,))
         conn.commit()
         notify.after_fetch(conn, cfg, cfg.channels(), [900001], log=lambda m: None)
         notify.after_fetch(conn, cfg, cfg.channels(), [900001], log=lambda m: None)   # same event: no repeat
@@ -117,12 +117,61 @@ def test_pipeline():
         print("phone alerts:", got)
         assert len(restarts) == 1 and restarts[0][0] == "/dd-test"
         ns.shutdown()
+        cfg.data["notify"]["ntfy_topic"] = ""
+
+        # ---- several satellites: the catalog, tracking a second one, automatic channels ----
+        from downlink_desk import catalog
+        from downlink_desk.server import App
+        catalog.refresh(conn, cfg, log=lambda m: None, force=True)
+        cat = catalog.entries(conn, cfg)
+        names = [e["name"] for e in cat]
+        print("catalog:", names[:10], "...", len(cat))
+        assert names[0] == "GRBBeta" and cat[0]["featured"] and cat[0]["tracked"]
+        assert "TESTSAT" in names and "GRBAlpha" not in names and "NODECODER" not in names
+        app = App(cfg)
+        app.track(99999, "AF")
+        assert fetch.run(cfg, force=True, log=msgs.append, only=99999) == 0, msgs
+        n2 = conn.execute("SELECT COUNT(*) FROM frames WHERE norad=99999").fetchone()[0]
+        spec2 = app.spec(app.sat({"sat": "99999"}))
+        print("TESTSAT frames", n2, "auto channels", len(spec2["channels"]), [c["id"] for c in spec2["channels"]][:6])
+        assert n2 > 0 and spec2.get("auto") and len(spec2["channels"]) > 10
+        assert all(not c["id"].startswith("csp_hdr") for c in spec2["channels"])
+        fleet = {f["norad"]: f for f in app.fleet()}
+        assert fleet[60237]["bio"] and fleet[99999]["frames_24h"] >= 0
+        # GRBBeta's own data is untouched by the second satellite
+        assert conn.execute("SELECT COUNT(*) FROM frames WHERE norad=60237").fetchone()[0] == n + 1
+        app.untrack(99999, "AF")
+        assert [s["norad"] for s in dbm.satellites(conn)] == [60237]
+        assert logchain.verify(conn)["problems"][0]["seq"] == 1   # only the edit we made on purpose
         print("requests to mock:", state["requests"])
     finally:
         httpd.shutdown()
         shutil.rmtree(tmp)
 
 
+def test_migrates_v02_database():
+    """A database from the single-satellite version opens cleanly and keeps its data."""
+    src = Path("/tmp/claude-0/v02.db")
+    if not src.exists():
+        print("(no v0.2 database to migrate; skipped)")
+        return
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        cfg = make_cfg(tmp, 8766)
+        cfg.db_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(src, cfg.db_path)
+        conn = dbm.open_db(cfg)
+        n = conn.execute("SELECT COUNT(*) FROM frames").fetchone()[0]
+        nn = conn.execute("SELECT COUNT(*) FROM frames WHERE norad=60237").fetchone()[0]
+        assert n and n == nn, (n, nn)
+        assert dbm.satellites(conn)[0]["norad"] == 60237
+        assert dbm.smeta_get(conn, 60237, "tle") and dbm.meta_get(conn, "tle") is None
+        print("migrated v0.2 database:", n, "frames")
+    finally:
+        shutil.rmtree(tmp)
+
+
 if __name__ == "__main__":
+    test_migrates_v02_database()
     test_pipeline()
     print("OK")

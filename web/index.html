@@ -212,6 +212,31 @@ textarea{width:100%;border:1px solid var(--line);border-radius:5px;background:va
 .limform label{display:flex;flex-direction:column;gap:4px}
 .limform input{padding:6px 8px;border:1px solid var(--line);border-radius:5px;background:var(--panel);font-family:var(--f-mono);width:100%}
 @media (max-width:520px){.limform{grid-template-columns:repeat(2,minmax(0,1fr))}}
+/* satellite picker */
+.satpick{position:relative}
+.satbtn{display:flex;align-items:center;gap:8px;border:1px solid var(--line);background:var(--panel);border-radius:6px;padding:6px 10px;cursor:pointer;text-align:left}
+.satbtn:hover{border-color:var(--accent)}
+.satbtn b{font:700 22px/1 var(--f-display)}
+.satbtn .caret{color:var(--muted);font-size:12px}
+.satmenu{position:absolute;top:calc(100% + 6px);left:0;z-index:30;width:min(420px,calc(100vw - 32px));background:var(--panel);border:1px solid var(--line);border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.18);overflow:hidden}
+.satrow{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:2px 10px;align-items:center;width:100%;border:0;background:none;padding:10px 14px;text-align:left;cursor:pointer;border-top:1px solid var(--line)}
+.satrow:first-child{border-top:0}
+.satrow:hover,.satrow.cur{background:var(--sunk)}
+.satrow .nm{font-weight:600}
+.satrow .sm{grid-column:2/4;font-size:12px;color:var(--muted)}
+.satmenu .foot{padding:10px 14px;border-top:1px solid var(--line);background:var(--sunk)}
+.modal{position:fixed;inset:0;background:var(--scrim);z-index:25;display:flex;align-items:flex-start;justify-content:center;padding:calc(24px + env(safe-area-inset-top,0px)) 16px 24px;overflow:auto}
+.modal .mbox{background:var(--panel);border:1px solid var(--line);border-radius:10px;width:min(900px,100%);display:flex;flex-direction:column;max-height:calc(100vh - 48px)}
+.modal .mbox .ph{position:sticky;top:0;background:var(--panel);z-index:1}
+.modal .scroll{overflow:auto;padding:14px;display:flex;flex-direction:column;gap:14px}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
+.card{border:1px solid var(--line);border-radius:8px;padding:14px;display:flex;flex-direction:column;gap:8px;background:var(--panel)}
+.card h3{font:600 18px/1.2 var(--f-display)}
+.card .facts{font:12px var(--f-mono);color:var(--muted)}
+.card p{margin:0;font-size:13.5px}
+.card .row{margin-top:auto}
+.biocard{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px 18px;align-items:start}
+.biocard p{margin:0;max-width:72ch}
 #toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(18px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:9px 14px;border-radius:6px;font-size:13px;max-width:calc(100% - 32px);box-shadow:0 4px 16px rgba(0,0,0,.2);z-index:40}
 </style>
 </head>
@@ -220,7 +245,10 @@ textarea{width:100%;border:1px solid var(--line);border-radius:5px;background:va
   <div class="livebar" id="livebar"><span><span class="pulse"></span><span id="liveText">Connecting to this Pi…</span></span><span>Volunteer-received data, decoded locally · not an official mission console · provisional limits</span></div>
 
   <header class="top">
-    <div class="brand"><b>Downlink Desk</b><small id="sub">Loading…</small></div>
+    <div class="brand"><span class="label">Downlink Desk</span>
+      <div class="satpick" id="satpick"><button class="satbtn" id="satBtn" aria-haspopup="true" aria-expanded="false"><b id="satName">Loading…</b><span class="caret">▾</span></button>
+        <div class="satmenu" id="satMenu" hidden></div></div>
+      <small id="sub"></small></div>
     <div class="clock">
       <div><span class="label">UTC</span><span class="mono" id="utc">--:--:--Z</span></div>
       <div><span class="label">Date</span><span class="mono" id="date">----</span></div>
@@ -288,7 +316,7 @@ textarea{width:100%;border:1px solid var(--line);border-radius:5px;background:va
   </section>
 
   <section id="tab-frames" class="panel" hidden>
-    <div class="ph"><h2>Frames from SatNOGS</h2><div class="row"><select class="txt" id="frameFilter" aria-label="Filter frames"><option value="">All frames</option></select><a class="btn" href="/api/export/telemetry.csv">Download telemetry CSV</a></div></div>
+    <div class="ph"><h2>Frames from SatNOGS</h2><div class="row"><select class="txt" id="frameFilter" aria-label="Filter frames"><option value="">All frames</option></select><a class="btn" id="csvLink" href="/api/export/telemetry.csv">Download telemetry CSV</a></div></div>
     <div class="pb"><p class="note">Raw frames uploaded by volunteer stations, decoded on this Pi with the community decoder. Select a row for every decoded field and the raw bytes. Unrecognised frames are ones the decoder couldn't parse, often digipeated traffic or noise.</p></div>
     <div class="dt"><table><thead><tr><th>Time (UTC)</th><th>Heard by</th><th>Satellite</th><th>Type</th><th>Key values</th></tr></thead><tbody id="frameBody"></tbody></table></div>
     <div class="pb"><button class="btn" id="olderFrames">Load older frames</button></div>
@@ -341,6 +369,7 @@ textarea{width:100%;border:1px solid var(--line);border-radius:5px;background:va
   </section>
 
   <section id="tab-about" class="stack about" hidden>
+    <div class="panel pb" style="padding:18px" id="bioPanel"></div>
     <div class="panel pb stack" style="padding:18px">
       <h2>What this is</h2>
       <p>Downlink Desk is a lightweight operations console running on this Raspberry Pi. Every half hour or so it asks the SatNOGS database for new frames from <span class="satname">the satellite</span>, decodes them with the community decoder, and stores them here. The console checks the values against limits, notices when data stops arriving, keeps a signed log of who did what, and builds shift handovers.</p>
@@ -359,6 +388,10 @@ textarea{width:100%;border:1px solid var(--line);border-radius:5px;background:va
   </section>
 </div>
 
+<div class="modal" id="catModal" hidden><div class="mbox" role="dialog" aria-modal="true" aria-labelledby="catTitle">
+  <div class="ph"><h2 id="catTitle">Track a satellite</h2><div class="row"><input class="txt" id="catSearch" placeholder="Search by name, country or decoder" aria-label="Search satellites" style="width:min(280px,60vw)"><button class="btn" id="catClose">Close</button></div></div>
+  <div class="scroll" id="catBody"><p class="note">Loading the catalog…</p></div>
+</div></div>
 <div class="scrim" id="scrim" hidden><aside class="drawer" role="dialog" aria-modal="true" aria-labelledby="drTitle" id="drawer"></aside></div>
 <div id="toast" hidden></div>
 
@@ -385,7 +418,7 @@ async function api(path,opts){
   const o=Object.assign({headers:{}},opts||{});
   if(o.body&&typeof o.body!=='string'){o.body=JSON.stringify(o.body);o.headers['Content-Type']='application/json'}
   if(PASS)o.headers['X-Passcode']=PASS;
-  const r=await fetch(path,o);const j=await r.json().catch(()=>({}));
+  const r=await fetch(withSat(path),o);const j=await r.json().catch(()=>({}));
   if(!r.ok){const e=new Error(j.error||j.message||('HTTP '+r.status));e.status=r.status;e.body=j;throw e}
   return j;
 }
@@ -394,7 +427,12 @@ async function api(path,opts){
 const prefs=lsGet('downlinkdesk.live.prefs',{});
 let CS=prefs.cs||'',PASS=prefs.pass||'',SOUND=!!prefs.sound,tab=prefs.tab||'console';
 let CONF=null,CH=[],CHM={},SERIES={},FRAMES=[],FRAME_IDS=new Set(),LOG=[],HEALTH=null,PASSES=null,NOTES={text:''};
-let OBS=null,ECL=[],NOW=null,SUNLIT_AT=new Map();
+let OBS=null,ECL=[],NOW=null,SUNLIT_AT=new Map(),FLEET=[],CATALOG=null;
+const qsat=new URLSearchParams(location.search).get('sat');
+let SAT=qsat?+qsat:(lsGet('downlinkdesk.sat',null));
+const GLOBAL_API=['/api/log','/api/log/verify','/api/notes','/api/satellites','/api/catalog','/api/satellites/track','/api/satellites/untrack','/api/export/log.json'];
+const withSat=path=>{const base=path.split('?')[0];if(!SAT||GLOBAL_API.includes(base))return path;return path+(path.includes('?')?'&':'?')+'sat='+SAT};
+const akey=k=>(CONF&&SAT&&SAT!==CONF.default_norad)?SAT+':'+k:k;
 let CFG={limits:{},acks:{},shelves:{},checks:{},equip:{},duty:null},D=null,online=false,lastPointT=0;
 const savePrefs=()=>lsSet('downlinkdesk.live.prefs',{cs:CS,pass:PASS,sound:SOUND,tab});
 
@@ -403,13 +441,13 @@ const MANUAL_EQ=[{id:'rx',name:'Own receiver (SDR)',detail:'For hearing passes y
 const EQ_STATES=['Operational','Degraded','Down','Maintenance','Not installed'];
 const EQ_CLASS={Operational:'ok',Degraded:'warn',Down:'crit',Maintenance:'stale','Not installed':'stale'};
 const PROC=[['frames','Overnight frames reviewed'],['alerts','Open alerts reviewed and acknowledged'],['fetch','Fetcher healthy: last fetch succeeded'],['limits','Limits still sensible'],['note','Anything unusual written in the log']];
-const KIND_TYPE={ack:'OPERATOR',shelve:'OPERATOR',unshelve:'OPERATOR',check:'OPERATOR',note:'OPERATOR',duty:'OPERATOR',handover:'OPERATOR',equip:'EQUIP',limits:'CONFIG',system:'OPERATOR'};
+const KIND_TYPE={ack:'OPERATOR',shelve:'OPERATOR',unshelve:'OPERATOR',check:'OPERATOR',note:'OPERATOR',duty:'OPERATOR',handover:'OPERATOR',equip:'EQUIP',limits:'CONFIG',system:'OPERATOR',satellite:'CONFIG'};
 function validLim(l){return Array.isArray(l)&&l.length===4&&l.every(v=>v===null||(typeof v==='number'&&isFinite(v)))}
 function buildCfg(){
   const c={limits:{},acks:{},shelves:{},checks:{},equip:{},duty:null,lastHandover:null};
   for(const e of LOG){const d=e.data||{};
     switch(e.kind){
-      case 'limits': if(CHM[d.ch]&&validLim(d.lim))(c.limits[d.ch]||(c.limits[d.ch]=[])).push({t:e.t,lim:d.lim,cs:e.cs});break;
+      case 'limits': if(CHM[d.ch]&&validLim(d.lim)&&(+(d.sat||CONF.default_norad))===SAT)(c.limits[d.ch]||(c.limits[d.ch]=[])).push({t:e.t,lim:d.lim,cs:e.cs});break;
       case 'ack': c.acks[d.alert]={cs:e.cs,t:e.t,sev:d.sev};break;
       case 'shelve': c.shelves[d.key]={cs:e.cs,t:e.t,until:+d.until||0,reason:String(d.reason||'')};break;
       case 'unshelve': delete c.shelves[d.key];break;
@@ -430,15 +468,15 @@ const limTxt=lim=>{if(!lim)return '—';const f=v=>v==null?'·':v;return `${f(li
 /* ---------- derive alerts from real data ---------- */
 function derive(now){
   const alerts=[],sys=[];const A={};
-  const bad=(key,sev,t,msg,ch)=>{const s=A[key]||(A[key]={a:null,ok:0});s.ok=0;
+  const bad=(key,sev,t,msg,ch)=>{key=akey(key);const s=A[key]||(A[key]={a:null,ok:0});s.ok=0;
     if(!s.a){s.a={id:key+'@'+t,key,sev,sev0:sev,raised:t,cleared:null,esc:null,msg,first:msg,ch};alerts.push(s.a)}
     else{if(sev==='crit'&&s.a.sev==='warn'){s.a.sev='crit';s.a.esc=t}s.a.msg=msg}};
-  const good=(key,t,need)=>{const s=A[key];if(!s||!s.a)return;if(++s.ok>=(need||2)){s.a.cleared=t;s.a=null;s.ok=0}};
+  const good=(key,t,need)=>{key=akey(key);const s=A[key];if(!s||!s.a)return;if(++s.ok>=(need||2)){s.a.cleared=t;s.a=null;s.ok=0}};
   for(const c of CH){const ser=SERIES[c.id]||[];let prev=null;
     for(const [t,v] of ser){
       const {lim}=limitsAt(c.id,t);
       if(lim){const s=limStatus(lim,v);if(s!=='ok')bad('lim:'+c.id,s,t,limitMsg(c,v,s,lim),c.id);else good('lim:'+c.id,t)}
-      if(c.counter==='reboot'&&prev!=null&&v>prev)alerts.push({id:'reboot:'+c.id+'@'+t,key:'reboot:'+c.id,sev:'warn',sev0:'warn',raised:t,cleared:t,esc:null,event:true,ch:c.id,msg:`${c.name} went from ${prev} to ${v}: a restart since the previous frame`,first:''});
+      if(c.counter==='reboot'&&prev!=null&&v>prev)alerts.push({id:akey('reboot:'+c.id)+'@'+t,key:akey('reboot:'+c.id),sev:'warn',sev0:'warn',raised:t,cleared:t,esc:null,event:true,ch:c.id,msg:`${c.name} went from ${prev} to ${v}: a restart since the previous frame`,first:''});
       prev=v}}
   // data freshness
   const stale=(CONF.stale_hours||12)*HOUR,dec=FRAMES.filter(f=>f[4]).map(f=>f[1]);
@@ -458,7 +496,7 @@ function derive(now){
   if(OBS&&OBS.silent_streak&&OBS.silent_streak.length>=OBS.silent_after){
     const ids=new Set(OBS.silent_streak),st=OBS.observations.filter(o=>ids.has(o.id));
     const last=st[st.length-1],names=[...new Set(st.map(o=>o.station))].join(', ');
-    alerts.push({id:'silent@'+st[0].id,key:'silent',sev:'crit',sev0:'crit',raised:last.end+(CONF.alerts.upload_grace_hours||3)*HOUR,cleared:null,
+    alerts.push({id:akey('silent')+'@'+st[0].id,key:akey('silent'),sev:'crit',sev0:'crit',raised:last.end+(CONF.alerts.upload_grace_hours||3)*HOUR,cleared:null,
       msg:`${st.length} scheduled observations in a row produced no frames (${names}). The satellite may have gone quiet, or those stations had trouble`,first:''});
   }
   const cut=CONF.commissioned_ms||0;
@@ -526,7 +564,7 @@ function renderStrip(now,AV){
   let worst='ok';for(const c of CH){const l=latest(c.id);if(!l)continue;const s=limStatus(limitsAt(c.id,now).lim,l[1]);if(s==='crit')worst='crit';else if(s==='warn'&&worst==='ok')worst='warn'}
   const un=AV.open.filter(a=>!a.ack),np=nextPass(now);
   const fetchOk=HEALTH&&HEALTH.last_ok_ms,fetchCls=!HEALTH?'':(AV.open.some(a=>['fetch','auth','token'].includes(a.key))?'crit':'ok');
-  const staleA=AV.open.concat(AV.shelved).find(a=>a.key==='stale'&&a.cleared==null);
+  const staleA=AV.open.concat(AV.shelved).find(a=>a.key===akey('stale')&&a.cleared==null);
   const chips=[
     {cls:staleA?staleA.sev:ld?'ok':'',l:'Latest data',v:ld?ago(now-ld[1])+' ago':'None yet',s:ld?`Heard by ${ld[2]||'unknown'} · ${fmtDT(ld[1])}`:'Waiting for the first fetch'},
     {cls:ld?worst:'',l:'Spacecraft',v:ld?{ok:'Nominal',warn:'Caution',crit:'Alarm'}[worst]:'—',s:'Against this console’s limits'},
@@ -606,6 +644,50 @@ function renderContext(now){
   if(HEALTH&&!HEALTH.token_present){sb.hidden=false;sb.className='banner crit';sb.innerHTML='<b>One step left:</b> put your SatNOGS DB API key in <code>secrets/satnogs_token</code> on the Pi, then press Fetch now. Get the key at db.satnogs.org → your avatar → Settings / API Token.'}
   else if(PASSES&&PASSES.note&&/latitude/.test(PASSES.note)){sb.hidden=false;sb.className='banner warn';sb.textContent='Set your station latitude and longitude in config.toml and restart the server to see passes over you.'}
   else sb.hidden=true;
+}
+
+/* ---------- satellite picker and catalog ---------- */
+function satStatus(f,now){if(f.silent)return ['crit','Silent run'];if(!f.last_frame_ms)return ['stale','No data yet'];
+  const age=now-f.last_frame_ms,st=(CONF.stale_hours||12)*HOUR;return age>2*st?['crit','No data '+ago(age)]:age>st?['warn','Quiet '+ago(age)]:['ok','Data '+ago(age)+' ago']}
+function renderPicker(){
+  const cur=FLEET.find(f=>f.norad===SAT)||{};$('#satName').textContent=cur.name||CONF.satellite.name;
+  $('#sub').textContent=[`NORAD ${SAT}`,cur.size,cur.country].filter(Boolean).join(' · ')+' · live data from the SatNOGS network';
+  document.title=(cur.name||CONF.satellite.name)+' · Downlink Desk';
+  const now=Date.now(),on=FLEET.filter(f=>f.enabled);
+  $('#satMenu').innerHTML=on.map(f=>{const [cls,txt]=satStatus(f,now);return `<button class="satrow${f.norad===SAT?' cur':''}" data-pick="${f.norad}"><span class="dot ${cls}"></span><span class="nm">${esc(f.name)}</span><span class="mono note">${f.frames_24h} today</span><span class="sm">${esc(txt)}${f.next_obs_ms?' · next expected '+fmtHM(f.next_obs_ms):''}${f.size?' · '+esc(f.size):''}</span></button>`}).join('')
+    +`<div class="foot"><button class="btn sm primary" id="openCatalog">Track another satellite…</button></div>`;
+}
+function togglePicker(open){const m=$('#satMenu');m.hidden=open===undefined?!m.hidden:!open;$('#satBtn').setAttribute('aria-expanded',!m.hidden)}
+function switchSat(n){lsSet('downlinkdesk.sat',n);location.search='?sat='+n}
+async function openCatalog(){togglePicker(false);$('#catModal').hidden=false;$('#catSearch').focus();
+  if(!CATALOG){try{CATALOG=await api('/api/catalog')}catch(e){$('#catBody').innerHTML='<p class="note">Could not load the catalog: '+esc(e.message)+'</p>';return}}renderCatalog()}
+function renderCatalog(){
+  const q=$('#catSearch').value.trim().toLowerCase();const m=e=>!q||[e.name,e.names,e.countries,e.country,e.decoder,e.builder].join(' ').toLowerCase().includes(q);
+  const feat=CATALOG.filter(e=>e.featured&&m(e)),rest=CATALOG.filter(e=>!e.featured&&m(e));
+  const btn=e=>e.tracked?(e.norad===SAT?'<span class="pill ok">Viewing</span>':`<button class="btn sm" data-pick="${e.norad}">Open</button>`):`<button class="btn sm primary" data-track="${e.norad}" data-name="${esc(e.name)}">Track</button>`;
+  const sat=e=>`<a href="https://db.satnogs.org/satellite/${e.norad}" target="_blank" rel="noopener">SatNOGS</a>`;
+  let h='';
+  if(feat.length)h+=`<div class="stack" style="gap:8px"><span class="label">Featured · work well with this console</span><div class="cards">${feat.map(e=>`<div class="card"><h3>${esc(e.name)}</h3>
+    <div class="facts">${esc([e.size,e.builder,e.country].filter(Boolean).join(' · '))}<br>Launched ${esc(e.launched||'—')} · NORAD ${e.norad}</div>
+    <p>${esc(e.bio||'')}</p><div class="row">${btn(e)}${e.website?`<a href="${esc(e.website)}" target="_blank" rel="noopener">Team site</a>`:''}${sat(e)}</div></div>`).join('')}</div></div>`;
+  h+=`<div class="stack" style="gap:8px"><span class="label">Everything else in orbit that this Pi can decode (${rest.length})</span>`+
+    (rest.length?`<div class="dt"><table style="min-width:560px"><thead><tr><th>Satellite</th><th>Country</th><th>Launched</th><th>Decoder</th><th></th></tr></thead><tbody>${rest.slice(0,300).map(e=>`<tr><td><b>${esc(e.name)}</b>${e.names?`<div class="note">${esc(e.names)}</div>`:''}</td><td>${esc(e.countries||'—')}</td><td class="mono">${esc(e.launched||'—')}</td><td class="mono">${esc(e.decoder)}</td><td style="text-align:right;white-space:nowrap">${btn(e)} ${sat(e)}</td></tr>`).join('')}</tbody></table></div>`
+      :`<p class="note">${CATALOG.some(e=>!e.featured)?'No matches.':'The full list downloads from SatNOGS with the next fetch (once a day).'}</p>`)+
+    '<p class="note">Satellites without a featured profile use automatic channels: every numeric field the community decoder produces, in raw units, with no limits until you set them.</p></div>';
+  $('#catBody').innerHTML=h;
+}
+async function trackSat(n,name){
+  if(!requireCs())return;
+  try{await api('/api/satellites/track',{method:'POST',body:{norad:n,cs:CS}});toast(`Tracking ${name}. Fetching its data now…`);
+    api('/api/fetch?sat='+n,{method:'POST',body:{}}).catch(()=>{});setTimeout(()=>switchSat(n),1200)}
+  catch(e){if(e.status===401){$('#passFld').hidden=false;toast('Enter the operator passcode first.')}else toast('Could not track it: '+e.message)}
+}
+function renderBio(){
+  const f=FLEET.find(x=>x.norad===SAT)||{name:CONF.satellite.name};const facts=[f.size,f.builder,f.country,f.launched?'launched '+f.launched:''].filter(Boolean).join(' · ');
+  $('#bioPanel').innerHTML=`<div class="biocard"><div class="stack" style="gap:8px"><span class="label">The satellite</span><h3 style="font:600 24px/1.1 var(--f-display)">${esc(f.name)}</h3>
+    <span class="facts mono note">${esc(facts||'NORAD '+SAT)}</span><p>${esc(f.bio||'No profile written for this satellite yet. Its data uses automatic channels straight from the community decoder.')}</p>
+    <div class="row">${f.website?`<a href="${esc(f.website)}" target="_blank" rel="noopener">Team site</a>`:''}<a href="https://db.satnogs.org/satellite/${SAT}" target="_blank" rel="noopener">SatNOGS page</a></div></div>
+    <div class="stack" style="gap:8px">${FLEET.filter(x=>x.enabled).length>1?`<button class="btn" id="untrack">Stop tracking</button><span class="note">Keeps its stored data.</span>`:''}</div></div>`;
 }
 
 /* ---------- expected vs received ---------- */
@@ -733,6 +815,7 @@ async function sha256hex(s){try{if(crypto.subtle){const b=await crypto.subtle.di
 
 /* ---------- about ---------- */
 function renderAbout(){
+  renderBio();
   const s=CONF.satellite,sat=(HEALTH&&HEALTH.satellite)||{};$$('.satname').forEach(e=>e.textContent=s.name);
   $('#satCredit').innerHTML=sat.website?`${esc(s.name)} is operated by its own team; see <a href="${esc(sat.website)}" target="_blank" rel="noopener">${esc(sat.website)}</a>.`:'';
   $('#specNote').textContent=CONF.spec.notes||'';
@@ -765,7 +848,8 @@ function addTelemetry(j){
 }
 async function poll(kind){
   try{
-    if(kind==='tel'){const since=FRAMES.length?Math.max(0,FRAMES[FRAMES.length-1][1]-DAY):Date.now()-8*DAY;addTelemetry(await api('/api/telemetry?since='+since))}
+    if(kind==='tel'){const since=FRAMES.length?Math.max(0,FRAMES[FRAMES.length-1][1]-DAY):Date.now()-8*DAY;const j=await api('/api/telemetry?since='+since);addTelemetry(j);
+      if(CONF&&CONF.spec.auto&&j.points.some(p=>!CHM[p[1]])){CONF=await api('/api/config');CH=CONF.spec.channels||[];CHM=Object.fromEntries(CH.map(c=>[c.id,c]));buildTlm();renderAbout()}}
     if(kind==='log'){const after=LOG.length?LOG[LOG.length-1].seq:0;const add=await api('/api/log?after='+after);if(add.length){LOG.push(...add);buildCfg()}}
     if(kind==='health')HEALTH=await api('/api/health');
     if(kind==='passes')PASSES=await api('/api/passes?hours=36');
@@ -777,17 +861,19 @@ async function poll(kind){
   }catch(e){if(!e.status)online=false}
 }
 async function boot(){
+  try{FLEET=await api('/api/satellites');const on=FLEET.filter(f=>f.enabled);if(!on.some(f=>f.norad===SAT)&&!FLEET.some(f=>f.norad===SAT))SAT=(on[0]||FLEET[0]||{}).norad||null}catch(e){}
   try{CONF=await api('/api/config')}catch(e){$('#liveText').textContent='Could not reach the Downlink Desk server on this Pi';$('#livebar').classList.add('down');setTimeout(boot,5000);return}
   CH=CONF.spec.channels||[];CHM=Object.fromEntries(CH.map(c=>[c.id,c]));online=true;
-  $('#sub').textContent=`${CONF.satellite.name} · NORAD ${CONF.satellite.norad} · live data from the SatNOGS network`;
+  SAT=CONF.satellite.norad;lsSet('downlinkdesk.sat',SAT);renderPicker();$('#csvLink').href='/api/export/telemetry.csv?sat='+SAT;
   $('#passFld').hidden=!CONF.write_protected;
   buildTlm();
   await Promise.all(['tel','log','health','passes','notes','obs','now','ecl'].map(poll));
   renderAbout();refresh(true);if(tab!=='console')showTab(tab);
   setInterval(()=>{tick++;refresh(false)},1000);
-  setInterval(()=>poll('tel'),60000);setInterval(()=>poll('log'),10000);setInterval(()=>poll('health'),20000);
+  setInterval(()=>poll('tel'),60000);setInterval(()=>{if(HEALTH&&(HEALTH.fetching||!FRAMES.length)){poll('tel');poll('health')}},10000);setInterval(()=>poll('log'),10000);setInterval(()=>poll('health'),20000);
   setInterval(()=>poll('passes'),600000);setInterval(()=>poll('notes'),15000);
   setInterval(()=>poll('obs'),120000);setInterval(()=>poll('now'),30000);setInterval(()=>poll('ecl'),1800000);
+  setInterval(async()=>{try{FLEET=await api('/api/satellites');renderPicker()}catch(e){}},60000);
 }
 
 /* ---------- events ---------- */
@@ -807,13 +893,21 @@ document.addEventListener('click',async e=>{
   if((el=T.closest('[data-unshelve]')))act('unshelve',{key:el.dataset.unshelve},`Unshelved alerts for ${el.dataset.unshelve}.`);
   if((el=T.closest('[data-step]'))&&!el.disabled)act('check',{day:el.dataset.day,step:el.dataset.step},`Daily check ${el.dataset.day}: ${PROC.find(p=>p[0]===el.dataset.step)[1]}.`);
   if(T.closest('[data-eqcancel]')){eqPending=null;$('#equip').dataset.sig='';refresh()}
-  if(T.closest('#fetchNow')){try{const r=await api('/api/fetch',{method:'POST',body:{}});toast(r.message);setTimeout(()=>poll('health'),1500);setTimeout(()=>{poll('tel');poll('health')},25000)}catch(err){toast(err.body&&err.body.message?err.body.message:'Could not start a fetch: '+err.message)}}
+  if(T.closest('#fetchNow')){try{const r=await api('/api/fetch?sat='+SAT,{method:'POST',body:{}});toast(r.message);setTimeout(()=>poll('health'),1500);setTimeout(()=>{poll('tel');poll('health')},25000)}catch(err){toast(err.body&&err.body.message?err.body.message:'Could not start a fetch: '+err.message)}}
   if(T.closest('#learnLim')){const c=CHM[drawerCh],r=learnLimits(c);if(r.err){$('#learnNote').textContent=r.err;return}
     r.lim.forEach((v,i)=>$('#lim'+i).value=v);$('#limReason').value=`Learned from ${r.n} samples over 14 days (typical ${r.lo.toFixed(c.dp)}–${r.hi.toFixed(c.dp)} ${c.unit})`;
     $('#learnNote').textContent='Suggested from the satellite’s own recent history: caution sits half the normal range outside it, alarm a full range outside it. Review, then Save to sign it into the log.'}
   if(T.closest('#drClose')||T===$('#scrim'))closeDrawer();
+  if(T.closest('#satBtn')){togglePicker();return}
+  if(!T.closest('#satpick')&&!$('#satMenu').hidden)togglePicker(false);
+  if((el=T.closest('[data-pick]'))){const n=+el.dataset.pick;if(n!==SAT)switchSat(n);else{togglePicker(false);$('#catModal').hidden=true}return}
+  if(T.closest('#openCatalog')){openCatalog();return}
+  if(T.closest('#catClose')||T===$('#catModal')){$('#catModal').hidden=true;return}
+  if((el=T.closest('[data-track]'))){trackSat(+el.dataset.track,el.dataset.name);return}
+  if(T.closest('#untrack')){const f=FLEET.find(x=>x.norad===SAT);if(!requireCs())return;
+    try{await api('/api/satellites/untrack',{method:'POST',body:{norad:SAT,cs:CS}});toast(`Stopped tracking ${f?f.name:SAT}.`);lsSet('downlinkdesk.sat',null);setTimeout(()=>location.search='',900)}catch(e){toast(e.message)}}
 });
-document.addEventListener('keydown',e=>{if(e.key==='Escape'&&drawerCh){closeDrawer();return}
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('#catModal').hidden){$('#catModal').hidden=true;return}if(e.key==='Escape'&&!$('#satMenu').hidden){togglePicker(false);return}if(e.key==='Escape'&&drawerCh){closeDrawer();return}
   if((e.key==='Enter'||e.key===' ')&&e.target.matches&&e.target.matches('tr[data-ch]')){e.preventDefault();openDrawer(e.target.dataset.ch)}});
 document.addEventListener('submit',async e=>{
   e.preventDefault();const f=e.target;
@@ -826,7 +920,7 @@ document.addEventListener('submit',async e=>{
     if(vals.some(v=>v!==null&&!isFinite(v))){toast('Limits must be numbers, or blank for none.');return}
     const nn=vals.filter(v=>v!=null);for(let i=1;i<nn.length;i++)if(nn[i]<=nn[i-1]){toast('Limits must increase from alarm low to alarm high.');return}
     const reason=$('#limReason').value.trim();if(!reason){toast('Give a reason for the limit change.');$('#limReason').focus();return}
-    const old=limitsAt(c.id,Date.now()).lim;if(await act('limits',{ch:c.id,lim:vals},`Limits for ${c.name} changed from ${limTxt(old)} to ${limTxt(vals.every(v=>v==null)?null:vals)} ${c.unit}: ${reason}`)){$('#limReason').value='';toast('Limits saved and signed.');renderDrawer(true)}}
+    const old=limitsAt(c.id,Date.now()).lim;if(await act('limits',{ch:c.id,lim:vals,sat:SAT},`Limits for ${c.name} changed from ${limTxt(old)} to ${limTxt(vals.every(v=>v==null)?null:vals)} ${c.unit}: ${reason}`)){$('#limReason').value='';toast('Limits saved and signed.');renderDrawer(true)}}
   if(f.id==='noteForm'){const v=$('#noteIn').value.trim();if(v&&await act('note',{},v))$('#noteIn').value=''}
 });
 $('#equip').addEventListener('change',e=>{const s=e.target.closest('select[data-eq]');if(!s)return;if(!requireCs()){$('#equip').dataset.sig='';refresh();return}
@@ -835,6 +929,7 @@ $('#cs').addEventListener('change',e=>{CS=e.target.value.trim().replace(/\s+/g,'
 $('#pass').addEventListener('change',e=>{PASS=e.target.value;savePrefs()});
 $('#sound').addEventListener('click',()=>{SOUND=!SOUND;if(SOUND){try{actx=actx||new (window.AudioContext||window.webkitAudioContext)();actx.resume();beep()}catch(e){}}const b=$('#sound');b.setAttribute('aria-pressed',SOUND);b.textContent=SOUND?'On':'Off';savePrefs()});
 $('#logFilter').addEventListener('change',renderLog);
+$('#catSearch').addEventListener('input',()=>{if(CATALOG)renderCatalog()});
 $('#frameFilter').addEventListener('change',renderFrames);
 $('#olderFrames').addEventListener('click',()=>loadFrames(true));
 $('#verify').addEventListener('click',async()=>{const o=$('#verifyOut');o.className='verify';o.textContent='Checking…';try{const v=await api('/api/log/verify');o.className='verify '+(v.ok?'ok':'bad');o.textContent=v.ok?`Chain intact · ${v.entries} signed entries · head ${v.head.slice(0,16)}`:'Problems found: '+v.problems.map(p=>`#${p.seq} ${p.problem}`).join('; ')}catch(e){o.className='verify bad';o.textContent='Could not verify: '+e.message}});

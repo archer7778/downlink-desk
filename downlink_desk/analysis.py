@@ -6,13 +6,14 @@ HOUR = 3600_000
 WINDOW_PAD = 120_000   # frames timestamped up to 2 min either side of an observation count towards it
 
 
-def observation_report(conn, cfg, since_ms, now_ms):
-    """Every observation ending after since_ms, with what actually arrived during it."""
+def observation_report(conn, cfg, since_ms, now_ms, norad):
+    """Every observation of one satellite ending after since_ms, with what actually arrived during it."""
     grace = cfg["alerts"]["upload_grace_hours"] * HOUR
     out = []
-    for o in conn.execute("SELECT * FROM observations WHERE end_ms>? ORDER BY start_ms", (since_ms,)).fetchall():
-        n, ok = conn.execute("SELECT COUNT(*), COALESCE(SUM(decoded_ok),0) FROM frames WHERE ts_ms BETWEEN ? AND ?",
-                             (o["start_ms"] - WINDOW_PAD, o["end_ms"] + WINDOW_PAD)).fetchone()
+    for o in conn.execute("SELECT * FROM observations WHERE end_ms>? AND norad=? ORDER BY start_ms",
+                          (since_ms, norad)).fetchall():
+        n, ok = conn.execute("SELECT COUNT(*), COALESCE(SUM(decoded_ok),0) FROM frames WHERE norad=? AND ts_ms BETWEEN ? AND ?",
+                             (norad, o["start_ms"] - WINDOW_PAD, o["end_ms"] + WINDOW_PAD)).fetchone()
         if now_ms < o["start_ms"]:
             status = "scheduled"
         elif now_ms <= o["end_ms"]:
@@ -43,14 +44,19 @@ def silent_streak(report, cfg):
     return list(reversed(streak))
 
 
-def limits_in_force(conn, spec):
-    """Default limits from the channels file, overridden by signed limit changes in the log."""
+def limits_in_force(conn, spec, norad, default_norad):
+    """Default limits from the channels file, overridden by signed limit changes in the log.
+    Limit entries from before multi-satellite support carry no satellite and belong to the first one."""
     lim = {c["id"]: c.get("lim") for c in spec["channels"]}
     for r in conn.execute("SELECT data_json FROM log WHERE kind='limits' ORDER BY seq"):
         try:
             d = json.loads(r["data_json"])
         except ValueError:
             continue
+        if int(d.get("sat") or default_norad) != norad:
+            continue
+        if not spec["channels"]:
+            lim.setdefault(d.get("ch"), None)
         if d.get("ch") in lim and isinstance(d.get("lim"), list) and len(d["lim"]) == 4:
             lim[d["ch"]] = None if all(v is None for v in d["lim"]) else d["lim"]
     return lim

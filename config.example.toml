@@ -2,7 +2,8 @@
 # Paths are relative to this file's folder.
 
 [satellite]
-norad = 60237                       # GRBBeta, a 1U CubeSat from TUKE (Slovakia)
+norad = 60237                       # GRBBeta, a 2U CubeSat from TUKE (Slovakia). The first satellite;
+                                    # add more from the satellite picker in the console.
 name = "GRBBeta"
 decoder = "grbbeta"                 # decoder name in the satnogs-decoders package
 channels = "channels/grbbeta.json"  # which decoded fields to show, with units and limits
