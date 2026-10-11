@@ -18,6 +18,11 @@ Downlink Desk watches real CubeSats in orbit. It pulls their telemetry from the 
 - **Battery health tab:** charge in and out around a whole orbit, how deep each eclipse drains the battery, whether it gets back to full in sunlight, voltage left at the end of eclipse and its trend, time spent outside lithium-ion's safe temperatures, and an effective internal resistance that rises as cells age.
 - **Life estimate:** charge cycles since launch (about 12,000 for GRBBeta so far) against a cycle-life model for lithium-ion at the measured depth and temperature, giving an estimated capacity left and years to end of life, with a range. Battery details the team hasn't published are written down as assumptions, with their source, in one editable file.
 
+**Shows where it is, right now**
+- **A live globe:** a line-drawn Earth (Natural Earth coastlines and borders) with the satellite's real position from SGP4, moving smoothly, an arrow for its heading, the last 45 minutes of ground track and the next orbit dashed, the area on the ground that can hear it, and the night side worked out from the Sun's position. Drag to spin it; it re-centres on the satellite by itself.
+- **Live numbers under it:** latitude and longitude, height, speed (about 7.6 km/s), heading, and whether it's in sunlight or Earth's shadow.
+- **Ground stations and the next downlink:** SatNOGS stations from the live schedule appear on the globe: the next one to listen (with the stretch of orbit it will hear drawn bold), any listening right now (linked to the satellite), and those that heard it today. Underneath, a ticking countdown to the next downlinks.
+
 **Watches the satellite and the network**
 - **Live feed:** frames appear in every open console the moment the Pi stores them (server-sent events).
 - **Expected vs received:** reads the SatNOGS Network schedule, so it knows which stations will listen and when, scores every observation as heard or empty, and counts down to the next data.
@@ -26,7 +31,7 @@ Downlink Desk watches real CubeSats in orbit. It pulls their telemetry from the 
 
 **Puts it in context**
 - **Space weather from NOAA:** geomagnetic storms (Kp and the G1–G5 scale), solar flares from GOES X-ray data, and solar flux, marked on every channel's chart so you can see whether that odd reading lined up with a storm.
-- **Where it is right now:** position, height, sunlight or shadow, and when the next sunrise is. Every frame is tagged with its orbit position, and the **South Atlantic Anomaly**, the radiation hot spot where spacecraft see the most particle hits, is flagged.
+- **Orbit context for every frame:** sunlight or shadow, position, and minutes since sunrise, with the **South Atlantic Anomaly**, the radiation hot spot where spacecraft see the most particle hits, flagged.
 - **Passes over your own location**, worked out on the Pi with SGP4.
 
 **Runs like a real operations desk**
@@ -59,7 +64,7 @@ NOAA space weather (every 3 h) ────────────────�
 - Frames are decoded locally with the community [satnogs-decoders](https://pypi.org/project/satnogs-decoders/) package and mapped to channels by a small JSON file.
 - `downlink_desk/server.py` is a standard-library web server that serves the console and a JSON API, and signs audit-log entries.
 - Scheduled observations come from the public SatNOGS Network API every 3 hours, following its paged list.
-- Sunlight and position come from the latest orbit data (SGP4 plus a cylindrical Earth-shadow model).
+- Sunlight and position come from the latest orbit data (SGP4 plus a cylindrical Earth-shadow model). The globe gets a position every 30 seconds from `/api/track` and interpolates on the sphere in between; it's drawn on a plain canvas with no map library, from a 73 KB outline file.
 - Alerts are worked out in the browser from the stored telemetry, so every viewer sees the same thing. Phone alerts are checked by the fetch job on the Pi.
 - `downlink_desk/baseline.py` is the learned model: robust medians in 5-minute bins of orbit phase, a seasonal correction for shadow length, and drift judged on effect size and significance together, so a single noisy pass can't trigger it.
 - `downlink_desk/battery.py` places every frame in the orbit's day/night cycle and integrates charge and discharge current around it; internal resistance comes from how voltage moves with current once the orbit pattern is removed.
@@ -104,6 +109,7 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 
 - Telemetry: the [SatNOGS](https://satnogs.org) network, run by the [Libre Space Foundation](https://libre.space) and volunteer station operators. SatNOGS data is licensed [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
 - Decoding: [satnogs-decoders](https://pypi.org/project/satnogs-decoders/). Orbits: [python-sgp4](https://pypi.org/project/sgp4/).
+- Map outlines: [Natural Earth](https://www.naturalearthdata.com) (public domain), via [world-atlas](https://github.com/topojson/world-atlas).
 - Space weather: [NOAA Space Weather Prediction Center](https://www.swpc.noaa.gov) (public domain).
 - GRBBeta is operated by its own team: <https://grbbeta.tuke.sk/>.
 - Built with help from Claude (Anthropic). Commits it made are marked as co-authored.
