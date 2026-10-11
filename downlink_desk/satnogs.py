@@ -40,7 +40,7 @@ class Client:
         self.gap = float(os.environ.get("DOWNLINK_DESK_MIN_GAP", MIN_GAP_S)) if local else MIN_GAP_S
         self.last_status = None
 
-    def _get(self, url, params=None, auth=False, timeout=30):
+    def _get(self, url, params=None, auth=False, timeout=30, with_link=False):
         if params:
             url = url + ("&" if "?" in url else "?") + urllib.parse.urlencode(params)
         if urllib.parse.urlparse(url).netloc != self.host:
@@ -56,7 +56,8 @@ class Client:
             try:
                 with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=timeout) as r:
                     self.last_status = r.status
-                    return json.loads(r.read().decode("utf-8"))
+                    data = json.loads(r.read().decode("utf-8"))
+                    return (data, _next_link(r.headers.get("Link"))) if with_link else data
             except urllib.error.HTTPError as e:
                 self.last_status = e.code
                 if e.code in (401, 403):
@@ -112,18 +113,24 @@ def scheduled_observations(network_api, norad):
     One request; the API returns the soonest-ending ~25 future observations."""
     c = Client(network_api)
     items = []
-    for page in (1, 2):   # 25 per page; a second page only when the first is full
+    url, params = f"{c.api}/observations/", {"norad_cat_id": norad, "status": "future", "format": "json"}
+    complete = False
+    # The list comes latest-first, 25 at a time, with the next page in a Link header
+    # (the API rejects a page= parameter). Up to 4 pages reaches the soonest ones.
+    for page in range(4):
         try:
-            data = c._get(f"{c.api}/observations/", {"norad_cat_id": norad, "status": "future", "format": "json",
-                                                       "page": page})
+            data, nxt = c._get(url, params, with_link=True)
         except (Refused, AuthError):
-            if page == 1:
+            if page == 0:
                 raise
             break
         got = data.get("results", []) if isinstance(data, dict) else data
         items.extend(got)
-        if len(got) < 25:
+        nxt = nxt or (data.get("next") if isinstance(data, dict) else None)
+        if not nxt or not got:
+            complete = True
             break
+        url, params = nxt, None
     out = []
     for o in items:
         if o.get("norad_cat_id") not in (None, norad):
@@ -135,7 +142,16 @@ def scheduled_observations(network_api, norad):
                     "station_name": str(o.get("station_name") or "")[:80], "lat": o.get("station_lat"),
                     "lng": o.get("station_lng"), "max_alt": o.get("max_altitude"),
                     "mode": str(o.get("transmitter_description") or o.get("transmitter_mode") or "")[:80]})
-    return out, len(items) < 50
+    return out, complete
+
+
+def _next_link(header):
+    """The rel="next" URL from an HTTP Link header, if any."""
+    for part in (header or "").split(","):
+        bits = part.split(";")
+        if len(bits) >= 2 and 'rel="next"' in part.replace("'", '"'):
+            return bits[0].strip().strip("<>")
+    return None
 
 
 def _iso(ms):
