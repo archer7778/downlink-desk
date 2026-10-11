@@ -1,0 +1,1132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Downlink Desk Training Simulator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: operations console — status strip, telemetry + timeline (left) beside alerts, procedure,
+   equipment and simulator (right). Passes, audit trail, handover and editions live in tabs; a drawer
+   opens per channel for history and limits. */
+:root{
+  --bg:#e9edf1; --panel:#fbfcfd; --sunk:#f1f4f7; --ink:#15212c; --muted:#5b6b79; --line:#d2dae1;
+  --accent:#2a55b5; --accent-ink:#ffffff; --accent-bg:#e3eafa;
+  --ok:#1d7f53; --warn:#a86c10; --crit:#bf3227; --stale:#7f8c99;
+  --ok-bg:#e1f2e9; --warn-bg:#fbefd9; --crit-bg:#fbe3e0; --stale-bg:#e7ebef;
+  --hatch:rgba(168,108,16,.22); --scrim:rgba(14,22,30,.42);
+  --f-display:"IBM Plex Sans Condensed","Arial Narrow",system-ui,sans-serif;
+  --f-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0c131a; --panel:#121c26; --sunk:#0f1820; --ink:#d9e3eb; --muted:#8798a8; --line:#233241;
+  --accent:#7aa2ff; --accent-ink:#0c131a; --accent-bg:#17284a;
+  --ok:#43c088; --warn:#e3a840; --crit:#f2675c; --stale:#6c7b8a;
+  --ok-bg:#12301f; --warn-bg:#33270f; --crit-bg:#3a1714; --stale-bg:#1a2531;
+  --hatch:rgba(227,168,64,.18); --scrim:rgba(0,0,0,.6); color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0c131a; --panel:#121c26; --sunk:#0f1820; --ink:#d9e3eb; --muted:#8798a8; --line:#233241;
+  --accent:#7aa2ff; --accent-ink:#0c131a; --accent-bg:#17284a;
+  --ok:#43c088; --warn:#e3a840; --crit:#f2675c; --stale:#6c7b8a;
+  --ok-bg:#12301f; --warn-bg:#33270f; --crit-bg:#3a1714; --stale-bg:#1a2531;
+  --hatch:rgba(227,168,64,.18); --scrim:rgba(0,0,0,.6); color-scheme:dark}
+
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+#modeTeam{display:none}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 var(--f-body)}
+.app{max-width:1480px;margin:0 auto;padding-inline:16px;padding-block:0 40px;display:flex;flex-direction:column;gap:14px}
+button,select,input,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.mono{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+.label{font:600 11px/1.2 var(--f-display);letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+h2{font:600 13px/1.2 var(--f-display);letter-spacing:.08em;text-transform:uppercase;margin:0}
+h3{margin:0}
+
+.simbar{margin-inline:-16px;padding:6px 16px;background:repeating-linear-gradient(-45deg,var(--hatch) 0 9px,transparent 9px 18px),var(--warn-bg);
+  border-bottom:1px solid var(--warn);font:600 12px/1.3 var(--f-display);letter-spacing:.08em;text-transform:uppercase;display:flex;flex-wrap:wrap;gap:4px 14px;justify-content:space-between}
+.simbar span:last-child{color:var(--muted);font-weight:500;letter-spacing:.02em;text-transform:none;font-family:var(--f-body)}
+
+header.top{display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px 22px;padding-top:4px}
+.brand{display:flex;flex-direction:column;gap:3px;min-width:0}
+.brand b{font:700 25px/1 var(--f-display);letter-spacing:.01em}
+.brand small{color:var(--muted);font-size:13px}
+.clock{display:flex;gap:18px;flex-wrap:wrap}
+.clock div{display:flex;flex-direction:column;gap:2px}
+.clock .mono{font-size:17px;font-weight:500}
+.ctl{display:flex;gap:10px 12px;align-items:flex-end;flex-wrap:wrap;margin-left:auto}
+.fld{display:flex;flex-direction:column;gap:3px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:5px;overflow:hidden;background:var(--panel)}
+.seg button{border:0;background:none;padding:6px 10px;cursor:pointer;font:500 13px var(--f-mono);white-space:nowrap}
+.seg.text button{font:600 12px var(--f-display);letter-spacing:.06em;text-transform:uppercase;padding:7px 11px}
+.seg button+button{border-left:1px solid var(--line)}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
+.seg button:disabled{opacity:.45;cursor:not-allowed}
+.op input{width:8.5em;padding:6px 8px;border:1px solid var(--line);border-radius:5px;background:var(--panel)}
+.op input:placeholder-shown{border-color:var(--warn)}
+.iconbtn{border:1px solid var(--line);background:var(--panel);border-radius:5px;padding:6px 9px;cursor:pointer;font-size:13px;white-space:nowrap}
+.iconbtn[aria-pressed="true"]{border-color:var(--accent);color:var(--accent)}
+
+.context{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;font-size:13px;color:var(--muted)}
+.context b{color:var(--ink);font-weight:600}
+.peers{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.peer{display:inline-flex;align-items:center;gap:5px;padding:2px 8px 2px 4px;border:1px solid var(--line);border-radius:12px;background:var(--panel);font:500 12px var(--f-mono);color:var(--ink)}
+.peer i{width:16px;height:16px;border-radius:50%;display:inline-block;flex:none}
+.ro{padding:9px 14px;border:1px solid var(--line);border-radius:6px;background:var(--stale-bg);font-size:13px}
+
+nav.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);overflow-x:auto}
+nav.tabs button{border:0;background:none;padding:9px 14px;cursor:pointer;font:600 13px var(--f-display);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);border-bottom:2px solid transparent;white-space:nowrap}
+nav.tabs button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
+nav.tabs .count{font-family:var(--f-mono);font-weight:500;margin-left:5px}
+nav.tabs .count.hot{color:var(--crit)}
+
+.strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}
+.chip{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:10px 12px;display:flex;flex-direction:column;gap:4px;min-width:0}
+.chip .v{font:600 18px/1.2 var(--f-display);letter-spacing:.02em;display:flex;align-items:center;gap:8px}
+.chip .s{font-size:12px;color:var(--muted)}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--stale);flex:none;display:inline-block}
+.ok .dot,.dot.ok{background:var(--ok)} .warn .dot,.dot.warn{background:var(--warn)} .crit .dot,.dot.crit{background:var(--crit)}
+.chip.crit{border-color:var(--crit);background:var(--crit-bg)}
+.chip.crit .dot{animation:blink 1s steps(2) infinite}
+@keyframes blink{50%{opacity:.25}}
+@media (prefers-reduced-motion:reduce){.chip.crit .dot{animation:none}}
+
+.grid{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:14px;align-items:start}
+.col{display:flex;flex-direction:column;gap:14px;min-width:0}
+@media (max-width:1020px){.grid{grid-template-columns:minmax(0,1fr)}}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:6px;min-width:0}
+.ph{display:flex;align-items:center;justify-content:space-between;gap:8px 10px;padding:10px 14px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.ph .sub{font-size:12px;color:var(--muted)}
+.pb{padding:12px 14px}
+.stack{display:flex;flex-direction:column;gap:12px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.note{font-size:12.5px;color:var(--muted);margin:0}
+.empty{padding:16px 14px;color:var(--muted);font-size:13px}
+
+.btn{border:1px solid var(--line);background:var(--panel);border-radius:5px;padding:6px 11px;cursor:pointer;font-weight:500;font-size:13px;white-space:nowrap}
+.btn:hover:not(:disabled){border-color:var(--accent)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.danger{border-color:var(--crit);color:var(--crit)}
+.btn.sm{padding:4px 8px;font-size:12px}
+.btn[aria-pressed="true"]{background:var(--warn-bg);border-color:var(--warn)}
+.btn.arm{background:var(--crit-bg);border-color:var(--crit);color:var(--crit)}
+input.txt,select.txt{padding:6px 8px;border:1px solid var(--line);border-radius:5px;background:var(--panel);min-width:0}
+
+/* telemetry */
+.tlm{overflow-x:auto}
+table{border-collapse:collapse;width:100%}
+.tlm table{min-width:640px}
+.tlm th{text-align:left;padding:6px 10px;font:600 11px var(--f-display);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.tlm td{padding:5px 10px;border-top:1px solid var(--line);vertical-align:middle}
+.tlm tbody tr[data-ch]{cursor:pointer}
+.tlm tbody tr[data-ch]:hover td{background:var(--sunk)}
+.tlm tr.sub td{background:var(--sunk);font:600 12px var(--f-display);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);padding:5px 10px}
+.tlm .nm{font-weight:500}
+.tlm .id{font:12px var(--f-mono);color:var(--muted)}
+.tlm .val{font:500 15px var(--f-mono);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+.tlm .unit{color:var(--muted);font:12px var(--f-mono);padding-left:0}
+.tlm .lim{font:11px var(--f-mono);color:var(--muted);white-space:nowrap}
+.tlm .lim.mod{color:var(--accent)}
+.tlm .age{font:12px var(--f-mono);color:var(--muted);text-align:right;white-space:nowrap}
+.spark{width:120px;height:26px;display:block;color:var(--accent)}
+.spark.warn{color:var(--warn)} .spark.crit{color:var(--crit)} .spark.stale{color:var(--stale)}
+.pill{display:inline-block;font:600 10.5px/1 var(--f-display);letter-spacing:.09em;text-transform:uppercase;padding:4px 7px;border-radius:3px;white-space:nowrap;background:var(--stale-bg);color:var(--stale)}
+.pill.ok{background:var(--ok-bg);color:var(--ok)} .pill.warn{background:var(--warn-bg);color:var(--warn)} .pill.crit{background:var(--crit-bg);color:var(--crit)} .pill.acc{background:var(--accent-bg);color:var(--accent)}
+tr.row-warn .val{color:var(--warn)} tr.row-crit .val{color:var(--crit)} tr.row-stale .val{color:var(--muted)}
+
+/* alerts */
+.alert{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:4px 10px;padding:10px 14px;border-top:1px solid var(--line);align-items:start}
+.alerts>.alert:first-child{border-top:0}
+.alert .msg{font-weight:500;overflow-wrap:anywhere}
+.alert .meta{grid-column:2/4;font:12px var(--f-mono);color:var(--muted);overflow-wrap:anywhere}
+.alert .acts{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.alert.closed,.alert.shelved{opacity:.7}
+.shelf{grid-column:1/4;display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:8px 10px;background:var(--sunk);border-radius:5px}
+.shelf input{flex:1 1 12em}
+details.more summary{cursor:pointer;padding:8px 14px;border-top:1px solid var(--line);color:var(--muted);font-size:13px}
+
+/* procedure */
+.proc-g{padding:6px 14px 2px;font:600 11px var(--f-display);letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+.step{display:flex;gap:10px;align-items:flex-start;width:100%;text-align:left;border:0;background:none;padding:6px 14px;cursor:pointer}
+.step:hover:not(:disabled){background:var(--sunk)}
+.step:disabled{cursor:default}
+.box{width:16px;height:16px;border:1.5px solid var(--muted);border-radius:3px;flex:none;margin-top:2px;display:grid;place-items:center;font-size:11px;line-height:1;color:var(--accent-ink)}
+.step.done .box{background:var(--accent);border-color:var(--accent)}
+.step .who{display:block;font:11.5px var(--f-mono);color:var(--muted)}
+.step .hint{display:block;font-size:11.5px;color:var(--accent)}
+.bar{height:6px;border-radius:3px;background:var(--stale-bg);overflow:hidden;min-width:60px}
+.bar i{display:block;height:100%;background:var(--ok)}
+.bar.warn i{background:var(--warn)} .bar.crit i{background:var(--crit)}
+
+.faults{display:flex;flex-wrap:wrap;gap:8px}
+.events{list-style:none;margin:0;padding:0}
+.events li{display:grid;grid-template-columns:5.6em 5em minmax(0,1fr);gap:8px;padding:5px 14px;border-top:1px solid var(--line);font-size:13px}
+.events li:first-child{border-top:0}
+.events li span:last-child{overflow-wrap:anywhere}
+.events .mono{font-size:12px;color:var(--muted)}
+.tag{font:600 10px/1.6 var(--f-display);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.tag.ALERT{color:var(--crit)} .tag.OPERATOR{color:var(--accent)} .tag.SIM{color:var(--warn)} .tag.EQUIP{color:var(--ok)} .tag.CONFIG{color:var(--accent)}
+.notebox{display:flex;gap:8px;padding:10px 14px;border-top:1px solid var(--line)}
+.notebox input{flex:1}
+
+.tl svg{width:100%;height:auto;display:block;min-width:520px}
+.tl-legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--muted);padding:0 14px 10px}
+.tl-legend i{display:inline-block;width:12px;height:8px;margin-right:5px;vertical-align:middle}
+
+.equip{width:100%}
+.equip td{padding:7px 14px;border-top:1px solid var(--line);vertical-align:middle}
+.equip tr:first-child td{border-top:0}
+.equip .nm{font-weight:500}
+.equip .nt{font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+.equip select{padding:4px 6px;border:1px solid var(--line);border-radius:4px;background:var(--panel);max-width:100%}
+.equip .pend td{background:var(--sunk);border-top:0}
+
+/* generic data tables */
+.dt{overflow-x:auto}
+.dt table{min-width:720px}
+.dt th{text-align:left;padding:7px 12px;font:600 11px var(--f-display);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--line);background:var(--panel);white-space:nowrap}
+.dt td{padding:6px 12px;border-top:1px solid var(--line);font-size:13px;vertical-align:middle}
+.dt td.mono{font-size:12.5px;white-space:nowrap}
+.dt tr.upcoming td{color:var(--muted)}
+.logtbl{max-height:70vh;overflow:auto}
+.logtbl th{position:sticky;top:0}
+.logtbl td{vertical-align:top}
+.logtbl td.msg{overflow-wrap:anywhere;min-width:280px}
+.verify{font:12.5px var(--f-mono)}
+.verify.ok{color:var(--ok)} .verify.bad{color:var(--crit)}
+
+.ho{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:14px;align-items:start}
+@media (max-width:900px){.ho{grid-template-columns:minmax(0,1fr)}}
+textarea{width:100%;border:1px solid var(--line);border-radius:5px;background:var(--sunk);padding:10px 12px;resize:vertical}
+#hoText{font:12.5px/1.55 var(--f-mono);min-height:460px;white-space:pre;overflow:auto}
+#hoNotes{min-height:150px;background:var(--panel)}
+.field{display:flex;flex-direction:column;gap:6px}
+.field input{padding:7px 9px;border:1px solid var(--line);border-radius:5px;background:var(--panel)}
+
+.about{display:grid;gap:14px}
+.about p{max-width:70ch;margin:0}
+.editions{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px}
+.ed{display:flex;flex-direction:column;gap:8px;padding:16px}
+.ed h3{font:600 18px/1.2 var(--f-display)}
+.ed .price{font:500 13px var(--f-mono);color:var(--accent)}
+.ed ul{margin:0;padding-left:18px}
+.ed li{margin:3px 0}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:13px;margin:0}
+.kv dt{color:var(--muted)} .kv dd{margin:0}
+
+/* drawer */
+.scrim{position:fixed;inset:0;background:var(--scrim);z-index:20;display:flex;justify-content:flex-end}
+.drawer{background:var(--panel);width:min(760px,100%);height:100%;overflow:auto;border-left:1px solid var(--line);
+  padding:calc(14px + env(safe-area-inset-top,0px)) 18px calc(24px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:16px}
+.dr-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+.dr-head h3{font:600 22px/1.15 var(--f-display)}
+.dr-now{display:flex;gap:12px;align-items:baseline;flex-wrap:wrap}
+.dr-now .big{font:500 32px/1 var(--f-mono);font-variant-numeric:tabular-nums}
+.chart{width:100%;overflow-x:auto}
+.chart svg{width:100%;min-width:520px;height:auto;display:block}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px}
+.stats div{display:flex;flex-direction:column;gap:2px;padding:8px 10px;background:var(--sunk);border-radius:5px}
+.stats .mono{font-size:15px}
+.limform{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.limform label{display:flex;flex-direction:column;gap:4px}
+.limform input{padding:6px 8px;border:1px solid var(--line);border-radius:5px;background:var(--panel);font-family:var(--f-mono);width:100%}
+@media (max-width:520px){.limform{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+#toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(18px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:9px 14px;border-radius:6px;font-size:13px;max-width:calc(100% - 32px);box-shadow:0 4px 16px rgba(0,0,0,.2);z-index:40}
+</style>
+</head>
+<body>
+
+<div class="app">
+  <div class="simbar"><span>Simulated spacecraft · training and demonstration only · not flight-qualified</span><span>Telemetry is generated by a deterministic model; nothing here talks to real hardware.</span></div>
+
+  <header class="top">
+    <div class="brand"><b>Downlink Desk</b><small>PICO-1 · simulated 1U CubeSat · ground station GS-01</small></div>
+    <div class="clock">
+      <div><span class="label" id="clockLabel">UTC</span><span class="mono" id="utc">--:--:--Z</span></div>
+      <div><span class="label">Date</span><span class="mono" id="date">----</span></div>
+      <div><span class="label">Orbit</span><span class="mono" id="orbit">--</span></div>
+    </div>
+    <div class="ctl">
+      <div class="fld"><span class="label">Console</span>
+        <div class="seg text" role="group" aria-label="Console mode" id="modeSeg">
+          <button data-mode="team" id="modeTeam" disabled title="Connecting…">Team · live</button><button data-mode="train" id="modeTrain">Training</button>
+        </div></div>
+      <div class="fld" id="speedFld"><span class="label">Sim speed</span>
+        <div class="row" style="gap:6px"><div class="seg" role="group" aria-label="Simulation speed" id="speed">
+          <button data-s="0" aria-label="Pause">❚❚</button><button data-s="1">1×</button><button data-s="10">10×</button><button data-s="60">60×</button>
+        </div><button class="iconbtn" id="skip">Next AOS ⇥</button></div></div>
+      <label class="fld op"><span class="label">Call sign</span><input id="cs" placeholder="Initials" maxlength="16" autocomplete="off"></label>
+      <div class="fld"><span class="label">Alarm tone</span><button class="iconbtn" id="sound" aria-pressed="false">Off</button></div>
+    </div>
+  </header>
+
+  <div class="context" id="context"></div>
+  <div class="ro" id="roNote" hidden></div>
+
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-tab="console" aria-selected="true">Console<span class="count" id="alertCount"></span></button>
+    <button role="tab" data-tab="passes" aria-selected="false">Passes</button>
+    <button role="tab" data-tab="log" aria-selected="false">Audit trail<span class="count" id="logCount"></span></button>
+    <button role="tab" data-tab="handover" aria-selected="false">Shift handover</button>
+    <button role="tab" data-tab="about" aria-selected="false">About &amp; editions</button>
+  </nav>
+
+  <!-- CONSOLE -->
+  <section id="tab-console" class="stack">
+    <div class="strip" id="strip"></div>
+    <div class="grid">
+      <div class="col">
+        <div class="panel">
+          <div class="ph"><h2>Spacecraft telemetry</h2><span class="sub">10 s frames during passes · select a channel for history and limits</span></div>
+          <div class="tlm"><table><thead><tr><th>Channel</th><th></th><th style="text-align:right">Value</th><th></th><th>Last 48 frames</th><th>Limits</th><th>Status</th><th style="text-align:right">Age</th></tr></thead><tbody id="tlmBody"></tbody></table></div>
+        </div>
+        <div class="panel tl">
+          <div class="ph"><h2>Pass timeline</h2><span class="sub">−2 h to +10 h over GS-01</span></div>
+          <div id="timeline" style="overflow-x:auto"></div>
+          <div class="tl-legend"><span><i style="background:var(--accent)"></i>Contact window, height = max elevation</span><span><i style="background:var(--stale);opacity:.45"></i>Eclipse</span><span><i style="background:var(--warn)"></i>Injected fault</span></div>
+        </div>
+        <div class="panel">
+          <div class="ph"><h2>Recent events</h2><button class="btn sm" data-goto="log">Open audit trail</button></div>
+          <ul class="events" id="recent"></ul>
+          <form class="notebox" id="noteForm"><input class="txt" id="noteIn" maxlength="400" placeholder="Add a note to the log, e.g. ‘Beacon audible on handheld at 12:40Z’" aria-label="Log note"><button class="btn" type="submit">Log note</button></form>
+        </div>
+      </div>
+      <div class="col">
+        <div class="panel">
+          <div class="ph"><h2>Alerts</h2><div class="row"><span class="sub" id="alertNote"></span><button class="btn sm" id="ackAll" hidden>Acknowledge all</button></div></div>
+          <div class="alerts" id="alerts"></div>
+          <details class="more" id="shelvedBox" hidden><summary id="shelvedSum">Shelved</summary><div class="alerts" id="shelved"></div></details>
+          <details class="more"><summary id="closedSum">Recently closed</summary><div class="alerts" id="closed"></div></details>
+        </div>
+        <div class="panel">
+          <div class="ph"><h2>Pass procedure</h2><span class="sub" id="procNote"></span></div>
+          <div id="proc"></div>
+        </div>
+        <div class="panel">
+          <div class="ph"><h2>Ground equipment</h2><span class="sub">Rotator, receiver or LNA down cuts the downlink</span></div>
+          <div style="overflow-x:auto"><table class="equip"><tbody id="equip"></tbody></table></div>
+        </div>
+        <div class="panel">
+          <div class="ph"><h2>Simulator</h2><span class="sub" id="simNote">Inject faults to rehearse</span></div>
+          <div class="pb stack">
+            <div class="faults" id="faults"></div>
+            <p class="note" id="simText"></p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PASSES -->
+  <section id="tab-passes" class="panel" hidden>
+    <div class="ph"><h2>Pass reports</h2><div class="row"><span class="sub">Last 36 hours and the next three passes</span><button class="btn" id="dlTlm">Export telemetry CSV</button></div></div>
+    <div class="dt"><table><thead><tr><th>Pass</th><th>AOS</th><th>LOS</th><th>Max el</th><th>Frames</th><th>Completeness</th><th>RSSI peak</th><th>SNR min</th><th>Alerts</th><th>Procedure</th></tr></thead><tbody id="passBody"></tbody></table></div>
+  </section>
+
+  <!-- LOG -->
+  <section id="tab-log" class="panel" hidden>
+    <div class="ph">
+      <h2>Audit trail</h2>
+      <div class="row">
+        <select class="txt" id="logFilter" aria-label="Filter by type"><option value="">All entries</option><option>OPERATOR</option><option>ALERT</option><option>PASS</option><option>EQUIP</option><option>CONFIG</option><option>SIM</option></select>
+        <button class="btn" id="verify">Verify chain</button>
+        <button class="btn" id="copyCsv">Copy CSV</button>
+        <button class="btn" id="dlJson" hidden>Download signed JSON</button>
+      </div>
+    </div>
+    <div class="pb stack">
+      <p class="note">Every operator action is a signed entry: it stores a SHA-256 hash of its own content and of the entry before it, so an edited or deleted entry shows up on verify. Alert and pass events are derived from telemetry and can be reproduced at any time, so they are not stored. Tamper-evident, not tamper-proof.</p>
+      <span class="verify" id="verifyOut"></span>
+    </div>
+    <div class="dt logtbl"><table><thead><tr><th>Time (UTC)</th><th>Type</th><th>By</th><th>Entry</th><th>Signature</th></tr></thead><tbody id="logBody"></tbody></table></div>
+  </section>
+
+  <!-- HANDOVER -->
+  <section id="tab-handover" hidden>
+    <div class="ho">
+      <div class="panel">
+        <div class="ph"><h2>Handover report</h2><div class="row"><button class="btn" id="hoCopy">Copy</button><button class="btn" id="hoDl" hidden>Download .txt</button></div></div>
+        <div class="pb"><textarea id="hoText" readonly aria-label="Handover report"></textarea></div>
+      </div>
+      <div class="panel">
+        <div class="ph"><h2>Sign off this shift</h2><span class="sub" id="dutyNote"></span></div>
+        <div class="pb stack">
+          <label class="field"><span class="label">Notes for the next operator <span id="notesShared" style="text-transform:none;letter-spacing:0"></span></span><textarea id="hoNotes" maxlength="4000" placeholder="What the data won't tell them: plans for the next pass, a commanding window, a hunch about the GPS receiver…"></textarea></label>
+          <label class="field"><span class="label">Incoming operator</span><input id="hoNext" placeholder="Call sign" maxlength="16" autocomplete="off"></label>
+          <div class="row"><button class="btn primary" id="hoSign">Sign handover</button><button class="btn" id="takeDuty">Take the console</button></div>
+          <p class="note">Signing writes the report's hash, the notes and both call signs to the audit trail and puts the incoming operator on duty. “Take the console” puts you on duty without a handover.</p>
+          <hr style="border:0;border-top:1px solid var(--line);margin:4px 0;width:100%">
+          <div class="row" id="resetRow"><button class="btn danger" id="reset">Reset training</button><span class="note">Clears the training log in this browser and restarts the simulator.</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ABOUT -->
+  <section id="tab-about" class="about" hidden>
+    <div class="panel pb stack" style="padding:18px">
+      <h2>What Downlink Desk is</h2>
+      <p>A small operations console for teams who fly or track small things: university CubeSat groups, high-altitude balloon launches, amateur ground stations and early satellite startups. It checks health telemetry against limits, notices when data that should be arriving isn't, keeps ground equipment status in one place, walks operators through each pass, records who did what in a signed log, and turns a shift into a handover report.</p>
+      <p><b>Team · live</b> runs on real time and is shared: everyone with access to this page sees the same spacecraft, alerts, procedure and log, and their actions appear for each other as they happen. <b>Training</b> is private to your browser, with speed control and a separate log, for practice and demos.</p>
+      <p>This build runs entirely on simulated data. It has not been verified, validated or qualified for flight or safety-critical use, and must not be relied on to make operational decisions about real hardware.</p>
+    </div>
+    <div class="editions">
+      <div class="panel ed"><span class="label">Edition</span><h3>Community</h3><span class="price">Free</span>
+        <ul><li>One mission, one ground station</li><li>Limit checks, data-gap alerts, signed audit trail, pass procedures, handover</li><li>Self-hosted, community support</li></ul></div>
+      <div class="panel ed"><span class="label">Service</span><h3>Setup &amp; support</h3><span class="price">Paid · fixed-scope engagement</span>
+        <ul><li>Telemetry decoder, channel list and limits configured for your spacecraft or payload</li><li>Ground station integration and operator training</li><li>On-call support through launch and early operations</li></ul></div>
+      <div class="panel ed"><span class="label">Service</span><h3>Research team build</h3><span class="price">Paid · quoted per team</span>
+        <ul><li>Custom subsystems, derived channels and procedures</li><li>Balloon flight profiles, multi-station and multi-mission views</li><li>Exports into your lab's data pipeline</li></ul></div>
+    </div>
+    <div class="panel pb stack" style="padding:18px">
+      <h2>Simulated mission</h2>
+      <dl class="kv">
+        <dt>Spacecraft</dt><dd>PICO-1, 1U CubeSat, 2S Li-ion battery (2.6 Ah), body-mounted panels</dd>
+        <dt>Orbit</dt><dd>95 min period, 61 min sunlit / 34 min eclipse</dd>
+        <dt>Downlink</dt><dd>437.250 MHz, one housekeeping frame every 10 s while in contact</dd>
+        <dt>Ground station</dt><dd>GS-01, crossed Yagis on an az/el rotator, SDR receiver, mast-head LNA</dd>
+        <dt>Alert rules</dt><dd>Caution and alarm limits per channel (2 nominal frames to clear), stuck-sensor check (8 identical frames), low array current in sunlight, unexpected reboot, no frames for 60 s during a pass</dd>
+      </dl>
+    </div>
+  </section>
+</div>
+
+<div class="scrim" id="scrim" hidden><aside class="drawer" role="dialog" aria-modal="true" aria-labelledby="drTitle" id="drawer"></aside></div>
+<div id="toast" hidden></div>
+
+<script>
+(()=>{
+'use strict';
+/* ================= utilities ================= */
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const pad=n=>String(n).padStart(2,'0');
+const fmtT=t=>{const d=new Date(t);return pad(d.getUTCHours())+':'+pad(d.getUTCMinutes())+':'+pad(d.getUTCSeconds())+'Z'};
+const fmtHM=t=>{const d=new Date(t);return pad(d.getUTCHours())+':'+pad(d.getUTCMinutes())+'Z'};
+const fmtD=t=>new Date(t).toISOString().slice(0,10);
+const fmtDT=t=>fmtD(t).slice(5)+' '+fmtT(t);
+const dur=ms=>{ms=Math.max(0,Math.round(ms/1000));return pad(Math.floor(ms/3600))+':'+pad(Math.floor(ms%3600/60))+':'+pad(ms%60)};
+const sdur=ms=>{const s=Math.max(0,Math.round(ms/1000));if(s<60)return s+' s';if(s<3600)return Math.floor(s/60)+' min'+(s%60?' '+(s%60)+' s':'');return Math.floor(s/3600)+' h '+pad(Math.floor(s%3600/60))+' min'};
+const rid=()=>Math.random().toString(36).slice(2,8);
+const lsGet=(k,d)=>{try{const v=localStorage.getItem(k);return v==null?d:JSON.parse(v)}catch(e){return d}};
+const lsSet=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}};
+
+/* ================= deterministic engine ================= */
+const COMMISSION=Date.UTC(2026,9,11,6,0),MIN=60000,HOUR=3600000,EPOCH=Date.UTC(2026,0,1),P=95*MIN,SUNM=61*MIN,FRAME=10000,BOOT0=Date.UTC(2026,8,28,4,12);
+function mix(a,b){let x=(a|0)^Math.imul((b|0)+0x632be5ab,0x9E3779B1);x^=x>>>16;x=Math.imul(x,0x85EBCA6B);x^=x>>>13;x=Math.imul(x,0xC2B2AE35);x^=x>>>16;return (x>>>0)/4294967296}
+const gn=(k,s)=>(mix(k,s)+mix(k,s+101)+mix(k,s+202)+mix(k,s+303)-2)/0.577;
+const PAT=[[88,62],[94,24],[176,41],[91,78],[97,18],[312,35],[90,53],[95,29]];
+const pdur=e=>Math.round((7+e/80*6)*60)*1000;
+const OFF=[];let CYC=0;PAT.forEach(([g,e])=>{OFF.push(CYC);CYC+=pdur(e)+g*MIN});
+function passK(k){const c=Math.floor(k/8),i=k-c*8,e=PAT[i][1];const max=Math.max(12,Math.round(e+(mix(k,91)-.5)*8));
+  const aos=EPOCH+c*CYC+OFF[i]+Math.round((mix(k,77)-.5)*360)*1000;return {k,aos,los:aos+pdur(max),max}}
+function passesIn(a,b){const out=[];for(let k=Math.floor((a-EPOCH)/CYC)*8-8;;k++){const p=passK(k);if(p.aos>b)break;if(p.los>a)out.push(p)}return out}
+const passAt=t=>passesIn(t,t).find(p=>t>=p.aos&&t<p.los)||null;
+function nextPass(t){for(let k=Math.floor((t-EPOCH)/CYC)*8-8;;k++){const p=passK(k);if(p.aos>t)return p}}
+function prevPass(t){let last=null;for(let k=Math.floor((t-EPOCH)/CYC)*8-16;;k++){const p=passK(k);if(p.los>t)return last;last=p}}
+const elev=(p,t)=>p?p.max*Math.sin(Math.PI*clamp((t-p.aos)/(p.los-p.aos),0,1)):0;
+const phaseOf=t=>((t-EPOCH)%P+P)%P;
+const sunlit=t=>phaseOf(t)<SUNM;
+const Scum=x=>Math.floor((x-EPOCH)/P)*SUNM+Math.min(phaseOf(x),SUNM);
+
+const CH=[
+ {id:'bat_v',sub:'EPS',name:'Battery voltage',unit:'V',dp:2,lim:[6.6,7.0,8.3,8.45]},
+ {id:'soc',sub:'EPS',name:'State of charge',unit:'%',dp:0,lim:[20,35,null,null]},
+ {id:'sol_i',sub:'EPS',name:'Solar array current',unit:'mA',dp:0,lim:null},
+ {id:'bus_i',sub:'EPS',name:'Bus load current',unit:'mA',dp:0,lim:[null,null,560,650]},
+ {id:'bat_t',sub:'Thermal',name:'Battery temperature',unit:'°C',dp:1,lim:[-5,0,40,50]},
+ {id:'obc_t',sub:'Thermal',name:'OBC board temperature',unit:'°C',dp:1,lim:[-20,-10,70,80]},
+ {id:'pnl_t',sub:'Thermal',name:'Panel +X temperature',unit:'°C',dp:1,lim:[-40,-30,80,95]},
+ {id:'gyr_x',sub:'ADCS',name:'Body rate X',unit:'°/s',dp:3,lim:[-5,-2,2,5],flat:true},
+ {id:'gyr_y',sub:'ADCS',name:'Body rate Y',unit:'°/s',dp:3,lim:[-5,-2,2,5],flat:true},
+ {id:'gyr_z',sub:'ADCS',name:'Body rate Z',unit:'°/s',dp:3,lim:[-5,-2,2,5],flat:true},
+ {id:'rssi',sub:'COMMS',name:'Downlink RSSI',unit:'dBm',dp:1,lim:[-124,-119,null,null]},
+ {id:'snr',sub:'COMMS',name:'Downlink SNR',unit:'dB',dp:1,lim:[2,4,null,null]},
+ {id:'uptime',sub:'OBC',name:'OBC uptime',unit:'h',dp:1,lim:null},
+ {id:'reboots',sub:'OBC',name:'Reboot counter',unit:'',dp:0,lim:null},
+];
+const CHM=Object.fromEntries(CH.map(c=>[c.id,c]));
+const EQUIP=[
+ {id:'rot',name:'Antenna rotator',detail:'Az/El, crossed Yagis',def:'Operational'},
+ {id:'sdr',name:'SDR receiver',detail:'437.250 MHz downlink',def:'Operational'},
+ {id:'lna',name:'Mast-head LNA',detail:'UHF, 20 dB gain',def:'Operational'},
+ {id:'gps',name:'GPS time reference',detail:'Station clock discipline',def:'Degraded',defNote:'Holdover; 3 satellites in view'},
+ {id:'pc',name:'Station computer',detail:'Decoder and logging',def:'Operational'},
+ {id:'ups',name:'UPS',detail:'Rooftop rack',def:'Operational'},
+];
+const EQM=Object.fromEntries(EQUIP.map(e=>[e.id,e]));
+const EQ_STATES=['Operational','Degraded','Down','Maintenance'];
+const EQ_CLASS={Operational:'ok',Degraded:'warn',Down:'crit',Maintenance:'stale'};
+const LINK_EQ=['rot','sdr','lna'];
+const FAULTS=[
+ {id:'link',name:'Link dropout',desc:'The spacecraft stops transmitting'},
+ {id:'heater',name:'Battery heater stuck on',desc:'The battery warms steadily and draws extra power'},
+ {id:'solar',name:'Solar array degraded',desc:'Array output falls to 30%'},
+ {id:'flat',name:'Gyro X stuck',desc:'Body rate X freezes at one value'},
+];
+const FM=Object.fromEntries(FAULTS.map(f=>[f.id,f]));
+const PROC=[
+ {g:'Before AOS',steps:[['pre1','Tracking file loaded and rotator test-slewed'],['pre2','Receiver on 437.250 MHz, recording armed'],['pre3','Station clock checked against GPS'],['pre4','Open alerts reviewed']]},
+ {g:'During pass',steps:[['dur1','First frame decoded'],['dur2','Health reviewed against limits']]},
+ {g:'After LOS',steps:[['post1','Recording archived'],['post2','Pass completeness noted in the log'],['post3','Rotator parked']]},
+];
+const STEPS=Object.fromEntries(PROC.flatMap(g=>g.steps));
+const NSTEPS=Object.keys(STEPS).length;
+
+/* configuration derived by replaying the signed log */
+function buildCfg(entries){
+  const cfg={faults:[],reboots:[],equip:{},limits:{},acks:{},shelves:{},checks:{},duty:null,lastHandover:null};
+  const open={};
+  for(const e of entries){const d=e.data||{};
+    switch(e.kind){
+      case 'fault': if(d.type==='reboot')cfg.reboots.push(e.t);else if(FM[d.type]){const f={id:String(d.fid),type:d.type,start:e.t,end:Infinity,cs:e.cs};cfg.faults.push(f);open[f.id]=f}break;
+      case 'fault_end': (Array.isArray(d.fids)?d.fids:[]).forEach(id=>{if(open[id]){open[id].end=e.t;delete open[id]}});break;
+      case 'equip': if(EQM[d.eq]&&EQ_STATES.includes(d.status))(cfg.equip[d.eq]||(cfg.equip[d.eq]=[])).push({t:e.t,status:d.status,note:String(d.note||''),cs:e.cs});break;
+      case 'limits': if(CHM[d.ch]&&validLim(d.lim))(cfg.limits[d.ch]||(cfg.limits[d.ch]=[])).push({t:e.t,lim:d.lim,cs:e.cs});break;
+      case 'ack': cfg.acks[d.alert]={cs:e.cs,t:e.t,sev:d.sev};break;
+      case 'shelve': cfg.shelves[d.key]={cs:e.cs,t:e.t,until:+d.until||0,reason:String(d.reason||'')};break;
+      case 'unshelve': delete cfg.shelves[d.key];break;
+      case 'check': if(STEPS[d.step])((cfg.checks[d.pass])||(cfg.checks[d.pass]={}))[d.step]={cs:e.cs,t:e.t};break;
+      case 'duty': cfg.duty={cs:e.cs,t:e.t};break;
+      case 'handover': cfg.duty={cs:String(d.to||''),t:e.t};cfg.lastHandover=e;break;
+    }}
+  return cfg;
+}
+function validLim(l){return Array.isArray(l)&&l.length===4&&l.every(v=>v===null||(typeof v==='number'&&isFinite(v)))}
+function statusAt(cfg,eq,t){const a=cfg.equip[eq];let r={status:EQM[eq].def,note:EQM[eq].defNote||'',t:null,cs:null};if(a)for(const x of a){if(x.t<=t)r=x;else break}return r}
+function limitsAt(cfg,ch,t){const a=cfg.limits[ch];let r=CHM[ch].lim,by=null;if(a)for(const x of a){if(x.t<=t){r=x.lim;by=x}else break}return {lim:r&&r.every(v=>v===null)?null:r,by}}
+const faultOn=(cfg,type,t)=>cfg.faults.some(f=>f.type===type&&t>=f.start&&t<f.end);
+const linkEqDown=(cfg,t)=>LINK_EQ.filter(id=>statusAt(cfg,id,t).status==='Down');
+const linkOk=(cfg,t)=>!faultOn(cfg,'link',t)&&!linkEqDown(cfg,t).length;
+
+function values(cfg,t,p){
+  const k=Math.round((t-EPOCH)/FRAME),ph=phaseOf(t),sun=ph<SUNM;
+  const heaterF=faultOn(cfg,'heater',t),heaterOn=heaterF||(!sun&&ph>P-12*MIN);
+  const solar=sun?430*(0.9+0.1*Math.sin(Math.PI*ph/SUNM))*(faultOn(cfg,'solar',t)?0.3:1):0;
+  const load=255+(p&&!faultOn(cfg,'link',t)?110:0)+(heaterOn?150:0);
+  let def=0,excess=0;
+  for(const f of cfg.faults){if(t<f.start)continue;const e=Math.min(t,f.end);
+    let lost=f.type==='solar'?(Scum(e)-Scum(f.start))/MIN*0.115:f.type==='heater'?(e-f.start)/MIN*0.05:0;
+    if(lost){if(t>f.end)lost-=(Scum(t)-Scum(f.end))/MIN*0.06;def+=Math.max(0,lost)}
+    if(f.type==='heater'){const run=Math.min(45,(e-f.start)/1000*0.02);excess+=t<f.end?run:run*Math.exp(-(t-f.end)/1200000)}}
+  const soc=clamp((sun?70+10*ph/SUNM:80-10*(ph-SUNM)/(P-SUNM))-def,0,100);
+  const batT=12+7*Math.sin(2*Math.PI*(ph/P-0.12))+(heaterOn&&!heaterF?2:0)+excess;
+  const pnlT=sun?-22+70*(1-Math.exp(-ph/(5*MIN))):48-70*(1-Math.exp(-(ph-SUNM)/(5*MIN)));
+  const el=elev(p,t);
+  let boot=BOOT0,nrb=2;for(const r of cfg.reboots)if(r<=t){nrb++;if(r>boot)boot=r}
+  const tumble=boot>BOOT0?2.8*Math.exp(-(t-boot)/(6*MIN)):0;
+  const rssi=-116.5+0.36*el+gn(k,11)*0.8;
+  return {bat_v:6.5+1.75*soc/100+(solar>0?0.08:-0.05)+gn(k,1)*0.01,soc,sol_i:Math.max(0,solar+(solar?gn(k,2)*6:0)),bus_i:load+gn(k,3)*8,
+    bat_t:batT+gn(k,4)*0.15,obc_t:24+6*el/90+2*Math.sin(2*Math.PI*ph/P)+gn(k,5)*0.2,pnl_t:pnlT+gn(k,6)*0.4,
+    gyr_x:faultOn(cfg,'flat',t)?0.137:gn(k,7)*0.18+tumble*0.9,gyr_y:gn(k,8)*0.18-tumble*0.6,gyr_z:0.42+gn(k,9)*0.12+tumble,
+    rssi,snr:(rssi+125)*0.9+gn(k,12)*0.4,uptime:(t-boot)/HOUR,reboots:nrb};
+}
+const roundV=v=>{const o={};for(const c of CH)o[c.id]=+v[c.id].toFixed(c.dp);return o};
+function limStatus(lim,v){if(!lim||v==null)return 'ok';const [rl,yl,yh,rh]=lim;
+  if((rl!=null&&v<rl)||(rh!=null&&v>rh))return 'crit';if((yl!=null&&v<yl)||(yh!=null&&v>yh))return 'warn';return 'ok'}
+const fv=(c,v)=>(+v).toFixed(c.dp)+(c.unit?' '+c.unit:'');
+function limitMsg(c,v,st,lim){const [rl,yl,yh,rh]=lim;const low=st==='crit'?(rl!=null&&v<rl):(yl!=null&&v<yl);
+  const L=st==='crit'?(low?rl:rh):(low?yl:yh);return `${c.name} ${fv(c,v)} ${low?'below':'above'} ${st==='crit'?'alarm':'caution'} limit ${fv(c,L)}`}
+
+/* run the model over a window: frames, alerts, pass statistics, derived events */
+function derive(cfg,now,alertFrom){
+  const W0=now-36*HOUR,passes=passesIn(W0,now+14*HOUR),frames=[],alerts=[],pstats={},A={},flat={};
+  let prevReb=null,solarBad=0;
+  const bad=(key,sev,t,msg,ch)=>{const s=A[key]||(A[key]={a:null,ok:0});s.ok=0;
+    if(!s.a){s.a={id:key+'@'+t,key,sev,sev0:sev,raised:t,cleared:null,esc:null,msg,first:msg,ch,pass:null};alerts.push(s.a)}
+    else{if(sev==='crit'&&s.a.sev==='warn'){s.a.sev='crit';s.a.esc=t}s.a.msg=msg}};
+  const good=(key,t,need)=>{const s=A[key];if(!s||!s.a)return;if(++s.ok>=(need||2)){s.a.cleared=t;s.a=null;s.ok=0}};
+  for(const p of passes){
+    if(p.aos>now)break;
+    const st={p,exp:0,rx:0,maxRssi:null,minSnr:null,first:null,last:null,gapMax:0};let miss=null;
+    const end=Math.min(p.los-10000,now);
+    for(let t=Math.ceil((p.aos+20000)/FRAME)*FRAME;t<=end;t+=FRAME){
+      if(elev(p,t)<=3)continue;st.exp++;
+      if(linkOk(cfg,t)){
+        const v=roundV(values(cfg,t,p));frames.push({t,k:p.k,v});st.rx++;st.first=st.first??t;st.last=t;
+        st.maxRssi=Math.max(st.maxRssi??-999,v.rssi);st.minSnr=Math.min(st.minSnr??999,v.snr);
+        if(miss!=null){good('gap',t,1);miss=null}
+        for(const c of CH){const {lim}=limitsAt(cfg,c.id,t);const s=limStatus(lim,v[c.id]);
+          if(lim){if(s!=='ok')bad('lim:'+c.id,s,t,limitMsg(c,v[c.id],s,lim),c.id);else good('lim:'+c.id,t)}
+          if(c.flat){const a=flat[c.id]||(flat[c.id]=[]);a.push(v[c.id]);if(a.length>8)a.shift();
+            if(a.length===8&&a.every(x=>x===a[0]))bad('flat:'+c.id,'warn',t,`${c.name} reported ${fv(c,a[0])} for 8 consecutive frames; possible stuck sensor`,c.id);else good('flat:'+c.id,t,1)}}
+        if(sunlit(t)&&sunlit(t-120000)&&v.sol_i<200){if(++solarBad>=2)bad('solar','warn',t,`Solar array current ${v.sol_i} mA in sunlight; expected above 300 mA`,'sol_i')}
+        else if(sunlit(t)&&v.sol_i>=200){solarBad=0;good('solar',t)}
+        if(prevReb!=null&&v.reboots>prevReb)alerts.push({id:'reboot@'+t,key:'reboot@'+t,sev:'warn',raised:t,cleared:t,esc:null,event:true,ch:'reboots',
+          msg:`OBC reboot detected: counter ${prevReb} → ${v.reboots}, uptime ${(v.uptime*60).toFixed(0)} min`,first:''});
+        prevReb=v.reboots;
+      }else{
+        if(miss==null)miss=t;const gap=t-miss+FRAME;st.gapMax=Math.max(st.gapMax,gap);
+        if(gap>60000){const dn=linkEqDown(cfg,t);bad('gap','crit',t,`No telemetry for ${sdur(gap)} during pass ${p.k}`+(dn.length?` (${dn.map(i=>EQM[i].name).join(', ')} marked Down)`:''),null)}
+      }
+    }
+    if(p.los<=now)good('gap',p.los,1);
+    pstats[p.k]=st;
+  }
+  for(let i=alerts.length-1;i>=0;i--)if(alerts[i].raised<alertFrom)alerts.splice(i,1);
+  alerts.forEach(a=>{if(!a.first)a.first=a.msg;const p=passes.find(p=>a.raised>=p.aos&&a.raised<=p.los);a.pass=p?p.k:null;if(p&&pstats[p.k])pstats[p.k].alerts=(pstats[p.k].alerts||0)+1});
+  const sys=[];
+  for(const p of passes){if(p.aos<W0||p.aos>now)continue;
+    sys.push({t:p.aos,type:'PASS',msg:`AOS pass ${p.k}, max elevation ${p.max}°, ${sdur(p.los-p.aos)} window.`});
+    if(p.los<=now){const s=pstats[p.k];sys.push({t:p.los,type:'PASS',msg:`LOS pass ${p.k}: ${s.rx} of ${s.exp} expected frames (${s.exp?Math.round(s.rx/s.exp*100):0}%).`})}}
+  for(const a of alerts){
+    sys.push({t:a.raised,type:'ALERT',msg:(a.event?'EVENT: ':a.sev0==='crit'?'ALARM: ':'CAUTION: ')+a.first});
+    if(a.esc)sys.push({t:a.esc,type:'ALERT',msg:'Escalated to ALARM: '+a.msg});
+    if(a.cleared&&!a.event)sys.push({t:a.cleared,type:'ALERT',msg:'Condition cleared: '+a.msg})}
+  return {frames,alerts,pstats,passes,sys};
+}
+
+/* ================= signing ================= */
+const HAS_SUBTLE=!!(window.crypto&&crypto.subtle&&window.TextEncoder);
+async function sha(str){if(HAS_SUBTLE){const b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(str));return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('')}
+  let h1=0x811c9dc5,h2=0x1b873593;for(let i=0;i<str.length;i++){const c=str.charCodeAt(i);h1=Math.imul(h1^c,0x01000193)>>>0;h2=Math.imul(h2^c,0x5bd1e995)>>>0}return 'f'+h1.toString(16).padStart(8,'0')+h2.toString(16).padStart(8,'0')}
+const canon=e=>[e.p,e.id,e.t,e.kind,JSON.stringify(e.data||{}),e.msg,e.cs,e.uid||''].join('␟');
+const KIND_TYPE={ack:'OPERATOR',shelve:'OPERATOR',unshelve:'OPERATOR',check:'OPERATOR',note:'OPERATOR',duty:'OPERATOR',handover:'OPERATOR',cs:'OPERATOR',equip:'EQUIP',limits:'CONFIG',fault:'SIM',fault_end:'SIM',sim:'SIM'};
+function cleanEntry(d,id){
+  if(!d||typeof d!=='object')return null;
+  const e={id:String(id||d.id||''),t:+d.t,kind:String(d.kind||''),msg:String(d.msg||'').slice(0,1200),cs:String(d.cs||'?').slice(0,16),uid:d.uid?String(d.uid):'',p:String(d.p||''),h:String(d.h||''),data:(d.data&&typeof d.data==='object'&&!Array.isArray(d.data))?d.data:{}};
+  if(!e.id||!isFinite(e.t)||!KIND_TYPE[e.kind])return null;return e;
+}
+const cmpE=(a,b)=>a.t-b.t||(a.id<b.id?-1:a.id>b.id?1:0);
+
+/* ================= stores ================= */
+function LocalStore(){
+  const KEY='downlinkdesk.v2.train';let st=lsGet(KEY,null);
+  if(!st||!Array.isArray(st.log))st={log:[],notes:'',clock:null};
+  st.log=st.log.map(d=>cleanEntry(d,d.id)).filter(Boolean).sort(cmpE);
+  const subs=new Set();const emit=()=>subs.forEach(f=>f());
+  return {kind:'train',ready:true,
+    entries:()=>st.log, notes:()=>({text:st.notes||''}), clock:()=>st.clock,
+    saveClock(c){st.clock=c;lsSet(KEY,st)},
+    async append(e){st.log.push(e);st.log.sort(cmpE);lsSet(KEY,st);emit()},
+    async setNotes(text){st.notes=text;lsSet(KEY,st)},
+    reset(){st={log:[],notes:'',clock:null};lsSet(KEY,st);emit()},
+    on(f){subs.add(f)}};
+}
+function DbStore(db){
+  let entries=[],notes={text:''},started=false,ready=false;const subs=new Set();const emit=w=>subs.forEach(f=>f(w));
+  return {kind:'team',get ready(){return ready},
+    start(){if(started)return;started=true;
+      db.collection('log').orderBy('t','desc').limit(1000).onSnapshot(s=>{entries=s.docs.map(d=>cleanEntry(d.data(),d.id)).filter(Boolean).sort(cmpE);ready=true;emit('log')},
+        e=>{toast('The shared log stopped updating ('+e.code+'). Reload the page to reconnect.')});
+      db.doc('notes/current').onSnapshot(s=>{const d=s.exists?s.data():null;notes={text:d&&typeof d.text==='string'?d.text:'',cs:d?String(d.cs||''):'',t:d?+d.t||0:0};emit('notes')},()=>{});
+    },
+    entries:()=>entries, notes:()=>notes, truncated:()=>entries.length>=1000,
+    append(e){return db.collection('log').doc(e.id).set({...e})},
+    setNotes(text){return db.doc('notes/current').set({text,cs:CS,t:Date.now()})},
+    on(f){subs.add(f)}};
+}
+
+/* ================= app state ================= */
+const prefs=lsGet('downlinkdesk.v2.prefs',{});
+let CS=prefs.cs||'', MODE='train', UID=null, READONLY=false, SOUND=!!prefs.sound;
+let DB=null, USER=null, ROOM=null, DL=null, teamStore=null, peers=[];
+const trainStore=LocalStore();
+let store=trainStore;
+const savePrefs=()=>lsSet('downlinkdesk.v2.prefs',{cs:CS,sound:SOUND,mode:MODE,tab});
+
+// training clock
+let clk=trainStore.clock();
+function freshClock(){const np=nextPass(Date.now());return {sim:np.aos+4*MIN,speed:10,start:np.aos+4*MIN}}
+if(!clk||!isFinite(clk.sim))clk=freshClock();if(!clk.start)clk.start=clk.sim;
+let anchorReal=performance.now(),anchorSim=clk.sim;
+const simNow=()=>anchorSim+(performance.now()-anchorReal)*clk.speed;
+function setSpeed(s){anchorSim=simNow();anchorReal=performance.now();clk.speed=s;persistClock()}
+function jumpTo(t){anchorSim=t;anchorReal=performance.now();persistClock()}
+function persistClock(){trainStore.saveClock({sim:simNow(),speed:clk.speed,start:clk.start})}
+const now=()=>MODE==='team'?Date.now():simNow();
+
+let CFG=buildCfg([]),D=null,ENT=[];
+function refreshCfg(){ENT=store.entries();CFG=buildCfg(ENT);dirty.all=true}
+const dirty={all:true};
+
+/* ================= actions (signed entries) ================= */
+let toastT;function toast(m){const el=$('#toast');el.textContent=m;el.hidden=false;clearTimeout(toastT);toastT=setTimeout(()=>el.hidden=true,3600)}
+function requireCs(){if(READONLY){toast('You can watch this console but not change it. Ask the owner for Contributor access.');return false}
+  if(CS)return true;toast('Enter your call sign first. Every action is signed with it.');$('#cs').focus();return false}
+let writing=Promise.resolve(),myLast=null;
+function act(kind,data,msg){
+  if(!requireCs())return Promise.resolve(false);
+  const run=async()=>{
+    const ents=store.entries(),last=ents.length?ents[ents.length-1]:null;
+    const prev=myLast&&myLast.store===store&&(!last||myLast.t>last.t||(myLast.t===last.t&&myLast.id>last.id))?myLast.h:(last?last.h:'genesis');
+    const t=Math.round(now());const e={id:t+'-'+rid(),t,kind,data:data||{},msg,cs:CS,uid:UID||'',p:prev,h:''};
+    e.h=await sha(canon(e));
+    try{await store.append(e);myLast={store,t:e.t,id:e.id,h:e.h};return true}
+    catch(err){const c=err&&err.code;
+      if(c==='invalid_argument'&&store.kind==='team'){READONLY=true;renderRO();toast('This page is read-only for you. Ask the owner for Contributor access to act on the console.')}
+      else if(c==='quota_exceeded')toast('The shared log is full. Export it from the audit trail, then ask the owner to archive old entries.');
+      else toast('That action was not saved ('+(c||'error')+'). Try again.');
+      return false}};
+  writing=writing.then(run,run);return writing;
+}
+
+/* ================= rendering ================= */
+const ST_LABEL={ok:'Nominal',warn:'Caution',crit:'Alarm',stale:'Stale',los:'Held · LOS',nodata:'No data',flat:'Flatline'};
+const ST_CLASS={ok:'ok',warn:'warn',crit:'crit',stale:'stale',los:'stale',nodata:'stale',flat:'warn'};
+let tab=prefs.tab||'console';
+
+function lastFrame(){return D.frames.length?D.frames[D.frames.length-1]:null}
+function chHist(id,n){const out=[];for(let i=D.frames.length-1;i>=0&&out.length<n;i--)out.unshift(D.frames[i].v[id]);return out}
+function chState(c,t){
+  const lf=lastFrame();if(!lf)return {st:'nodata',v:null,at:null};
+  const v=lf.v[c.id],{lim}=limitsAt(CFG,c.id,t);let st=limStatus(lim,v);
+  if(c.flat){const h=chHist(c.id,8);if(h.length===8&&h.every(x=>x===h[0]))st='flat'}
+  const p=passAt(t);
+  if(!p){if(st==='ok')st='los'}else if(t-lf.t>45000&&t>p.aos+60000)st='stale';
+  return {st,v,at:lf.t};
+}
+function alertView(t){
+  const list=D.alerts.map(a=>{const ack=CFG.acks[a.id];const acked=!!ack&&!(a.sev==='crit'&&ack.sev==='warn');
+    const closed=acked&&a.cleared!=null;const sh=CFG.shelves[a.key.split('@')[0]];const shelved=!closed&&sh&&sh.until>t?sh:null;
+    return {...a,ack:acked?ack:null,closed,shelved}});
+  const open=list.filter(a=>!a.closed&&!a.shelved).sort((a,b)=>(!!a.ack-!!b.ack)||((b.sev==='crit')-(a.sev==='crit'))||(b.raised-a.raised));
+  return {open,shelved:list.filter(a=>a.shelved),closed:list.filter(a=>a.closed).sort((a,b)=>b.cleared-a.cleared)};
+}
+
+function sparkSVG(h,cls){
+  if(h.length<2)return `<svg class="spark ${cls}" viewBox="0 0 120 26"></svg>`;
+  let lo=Math.min(...h),hi=Math.max(...h);if(hi-lo<1e-9){lo-=1;hi+=1}
+  const n=48,x=i=>(i+(n-h.length))*(118/(n-1))+1,y=v=>23-(v-lo)/(hi-lo)*20;
+  const pts=h.map((v,i)=>x(i).toFixed(1)+','+y(v).toFixed(1));
+  return `<svg class="spark ${cls}" viewBox="0 0 120 26" preserveAspectRatio="none" aria-hidden="true">
+   <path d="M${x(0).toFixed(1)},25 L${pts.join(' L')} L${x(h.length-1).toFixed(1)},25 Z" fill="currentColor" fill-opacity=".12"/>
+   <polyline points="${pts.join(' ')}" fill="none" stroke="currentColor" stroke-width="1.4" vector-effect="non-scaling-stroke"/>
+   <circle cx="${x(h.length-1).toFixed(1)}" cy="${y(h[h.length-1]).toFixed(1)}" r="2" fill="currentColor"/></svg>`;
+}
+const limTxt=lim=>{if(!lim)return '—';const f=v=>v==null?'·':v;return `${f(lim[0])} / ${f(lim[1])} · ${f(lim[2])} / ${f(lim[3])}`};
+
+function buildTlm(){
+  let html='',sub='';
+  for(const c of CH){if(c.sub!==sub){sub=c.sub;html+=`<tr class="sub"><td colspan="8">${sub}</td></tr>`}
+    html+=`<tr id="r-${c.id}" data-ch="${c.id}" tabindex="0" aria-label="${esc(c.name)}: open history and limits"><td class="nm">${esc(c.name)}</td><td class="id">${c.id}</td><td class="val" data-f="v">—</td><td class="unit">${esc(c.unit)}</td><td data-f="sp"></td><td class="lim" data-f="lim"></td><td data-f="st"></td><td class="age" data-f="age"></td></tr>`}
+  $('#tlmBody').innerHTML=html;
+}
+function renderTlm(t){
+  for(const c of CH){const s=chState(c,t),tr=document.getElementById('r-'+c.id),cl=ST_CLASS[s.st];
+    tr.className='row-'+cl;
+    tr.querySelector('[data-f=v]').textContent=s.v==null?'—':s.v.toFixed(c.dp);
+    tr.querySelector('[data-f=sp]').innerHTML=sparkSVG(chHist(c.id,48),cl==='ok'?'':cl);
+    const L=limitsAt(CFG,c.id,t),le=tr.querySelector('[data-f=lim]');le.textContent=limTxt(L.lim);le.classList.toggle('mod',!!L.by);le.title=L.by?`Changed by ${L.by.cs} ${fmtDT(L.by.t)}`:'Alarm low / caution low · caution high / alarm high (defaults)';
+    tr.querySelector('[data-f=st]').innerHTML=`<span class="pill ${cl}">${ST_LABEL[s.st]}</span>`;
+    tr.querySelector('[data-f=age]').textContent=s.at==null?'—':sdur(t-s.at);}
+}
+function renderStrip(t,AV){
+  const p=passAt(t),np=nextPass(t),lf=lastFrame();
+  const gap=AV.open.concat(AV.shelved).find(a=>a.key==='gap'&&a.cleared==null);
+  let worst='ok';if(lf)for(const c of CH){const s=limStatus(limitsAt(CFG,c.id,t).lim,lf.v[c.id]);if(s==='crit')worst='crit';else if(s==='warn'&&worst==='ok')worst='warn'}
+  if(AV.open.some(a=>a.key.startsWith('flat:')&&a.cleared==null)&&worst==='ok')worst='warn';
+  const un=AV.open.filter(a=>!a.ack);
+  const pp=prevPass(t),ps=pp&&D.pstats[pp.k];
+  const curS=p&&D.pstats[p.k];
+  const chips=[
+    {cls:gap?'crit':p?'ok':'',l:'Link',v:gap?'No data':p?`AOS · pass ${p.k}`:'LOS',s:gap?'In contact window, frames missing':p?`Elevation ${elev(p,t).toFixed(0)}° · LOS in ${dur(p.los-t)}`:'Out of contact; silence is expected'},
+    {cls:'',l:'Next pass',v:'T− '+dur(np.aos-t),s:`Pass ${np.k} at ${fmtHM(np.aos)} · max ${np.max}°`},
+    {cls:worst,l:'Spacecraft',v:{ok:'Nominal',warn:'Caution',crit:'Alarm'}[worst],s:lf?'As of frame '+fmtT(lf.t):'No frames in window'},
+    {cls:un.some(a=>a.sev==='crit')?'crit':un.length?'warn':'ok',l:'Alerts',v:`${AV.open.length} open`,s:un.length?`${un.length} need acknowledgement`+(AV.shelved.length?` · ${AV.shelved.length} shelved`:''):(AV.shelved.length?`${AV.shelved.length} shelved`:'All acknowledged')},
+    curS?{cls:'',l:'This pass',v:`${curS.rx}/${curS.exp} frames`,s:lf?'Last frame '+sdur(t-lf.t)+' ago':'Waiting for first frame'}
+        :{cls:ps&&ps.exp?(ps.rx/ps.exp<.8?'warn':'ok'):'',l:'Last pass',v:ps&&ps.exp?Math.round(ps.rx/ps.exp*100)+'% complete':'—',s:ps?`Pass ${pp.k}: ${ps.rx} of ${ps.exp} frames`:''},
+  ];
+  $('#strip').innerHTML=chips.map(c=>`<div class="chip ${c.cls}"><span class="label">${c.l}</span><span class="v">${c.cls?'<span class="dot"></span>':''}${c.v}</span><span class="s">${c.s}</span></div>`).join('');
+  const ac=$('#alertCount');ac.textContent=un.length?' '+un.length:'';ac.className='count'+(un.some(a=>a.sev==='crit')?' hot':'');
+}
+
+let shelveOpen=null;
+function alertRow(a,t){
+  const sevL=a.event?'Event':a.sev==='crit'?'Alarm':'Caution';
+  let acts='';
+  if(a.closed)acts='';
+  else if(a.shelved)acts=`<button class="btn sm" data-unshelve="${esc(a.key.split('@')[0])}">Unshelve</button>`;
+  else acts=(a.ack?'<span class="label">Acked</span>':`<button class="btn sm primary" data-ack="${esc(a.id)}">Acknowledge</button>`)+(a.event?'':`<button class="btn sm" data-shelve="${esc(a.id)}">Shelve</button>`);
+  const meta=[`Raised ${fmtT(a.raised)}`+(a.pass?` (pass ${a.pass})`:''), a.esc?'escalated '+fmtT(a.esc):'', a.event?'':(a.cleared==null?'condition active':'cleared '+fmtT(a.cleared)),
+    a.ack?`acked by ${esc(a.ack.cs)} ${fmtT(a.ack.t)}`:'', a.shelved?`shelved by ${esc(a.shelved.cs)} until ${fmtHM(a.shelved.until)}: ${esc(a.shelved.reason)}`:''].filter(Boolean).join(' · ');
+  const shelf=shelveOpen===a.id?`<form class="shelf" data-shelf="${esc(a.id)}"><select class="txt" id="shelfDur" aria-label="Shelve for"><option value="15">15 min</option><option value="60" selected>1 hour</option><option value="240">4 hours</option><option value="720">12 hours</option></select><input class="txt" id="shelfReason" maxlength="160" placeholder="Reason (required), e.g. known sensor issue, ticket 14" aria-label="Reason"><button class="btn sm primary" type="submit">Shelve</button><button class="btn sm" type="button" data-shelfcancel>Cancel</button></form>`:'';
+  return `<div class="alert${a.closed?' closed':''}${a.shelved?' shelved':''}"><span class="pill ${a.event?'acc':a.sev}">${sevL}</span><span class="msg">${a.ch?`<a href="#" data-chlink="${a.ch}" style="color:inherit">${esc(a.msg)}</a>`:esc(a.msg)}</span><span class="acts">${acts}</span><span class="meta">${meta}</span>${shelf}</div>`;
+}
+let lastAlertSig='',showAllAlerts=false;
+function renderAlerts(t,AV){
+  const sig=JSON.stringify([AV.open.map(a=>[a.id,a.sev,!!a.ack,a.cleared,a.msg]),AV.shelved.map(a=>a.id),AV.closed.length,shelveOpen,READONLY,showAllAlerts]);
+  if(sig===lastAlertSig)return;lastAlertSig=sig;
+  const keep=shelveOpen&&$('#shelfReason')?{r:$('#shelfReason').value,d:$('#shelfDur').value,f:document.activeElement&&document.activeElement.id}:null;
+  const shown=showAllAlerts?AV.open:AV.open.slice(0,10);
+  $('#alerts').innerHTML=AV.open.length?shown.map(a=>alertRow(a,t)).join('')+(AV.open.length>10?`<button class="btn sm" style="margin:8px 14px" id="moreAlerts">${showAllAlerts?'Show fewer':'Show all '+AV.open.length}</button>`:''):'<div class="empty">No open alerts. Limit violations, stuck sensors, reboots and missing data during a pass appear here.</div>';
+  if(keep&&$('#shelfReason')){$('#shelfReason').value=keep.r;$('#shelfDur').value=keep.d;if(keep.f)document.getElementById(keep.f)?.focus()}
+  $('#shelvedBox').hidden=!AV.shelved.length;$('#shelvedSum').textContent=`Shelved (${AV.shelved.length})`;$('#shelved').innerHTML=AV.shelved.map(a=>alertRow(a,t)).join('');
+  $('#closedSum').textContent=`Recently closed (${AV.closed.length})`;
+  $('#closed').innerHTML=AV.closed.length?AV.closed.slice(0,10).map(a=>alertRow(a,t)).join(''):'<div class="empty">Alerts close once the condition has cleared and someone has acknowledged them.</div>';
+  const un=AV.open.filter(a=>!a.ack);
+  $('#alertNote').textContent=AV.open.length?`${AV.open.length} open · ${un.length} unacknowledged`:'All clear';
+  $('#ackAll').hidden=un.length<2;
+}
+
+function procTarget(t){
+  const p=passAt(t);if(p)return {p,phase:'in'};
+  const pp=prevPass(t);if(pp&&t-pp.los<45*MIN){const c=CFG.checks[pp.k]||{};if(PROC[2].steps.some(([id])=>!c[id]))return {p:pp,phase:'post'}}
+  return {p:nextPass(t),phase:'pre'};
+}
+let lastProcSig='';
+function renderProc(t){
+  const T=procTarget(t),c=CFG.checks[T.p.k]||{},st=D.pstats[T.p.k];
+  const sig=JSON.stringify([T.p.k,T.phase,c,st&&st.first,READONLY,Math.floor((T.p.aos-t)/MIN)]);
+  if(sig===lastProcSig)return;lastProcSig=sig;
+  const done=Object.keys(c).length;
+  $('#procNote').textContent=`Pass ${T.p.k} · `+(T.phase==='in'?'in contact':T.phase==='post'?'post-pass':`AOS in ${dur(T.p.aos-t).slice(0,5)}`)+` · ${done}/${NSTEPS}`;
+  $('#proc').innerHTML=PROC.map(g=>`<div class="proc-g">${g.g}</div>`+g.steps.map(([id,txt])=>{const d=c[id];
+    const hint=id==='dur1'&&!d&&st&&st.first?`<span class="hint">First frame in log at ${fmtT(st.first)}</span>`:'';
+    return `<button class="step${d?' done':''}" data-step="${id}" data-pass="${T.p.k}" ${d||READONLY?'disabled':''}><span class="box">${d?'✓':''}</span><span>${esc(txt)}${d?`<span class="who">${esc(d.cs)} · ${fmtT(d.t)}</span>`:''}${hint}</span></button>`}).join('')).join('')+'<div style="height:8px"></div>';
+}
+
+let eqPending=null,lastEqSig='';
+function renderEquip(t){
+  const rows=EQUIP.map(e=>({e,s:statusAt(CFG,e.id,t)}));
+  const sig=JSON.stringify([rows.map(r=>[r.s.status,r.s.note,r.s.t]),eqPending,READONLY]);if(sig===lastEqSig)return;lastEqSig=sig;
+  $('#equip').innerHTML=rows.map(({e,s})=>{const pend=eqPending&&eqPending.id===e.id;
+    return `<tr><td style="width:1%"><span class="dot ${EQ_CLASS[s.status]}"></span></td><td><div class="nm">${esc(e.name)}</div><div class="nt">${esc(s.note||e.detail)}${s.cs?` · ${esc(s.cs)} ${fmtHM(s.t)}`:''}</div></td>
+     <td style="text-align:right"><select data-eq="${e.id}" id="eq-${e.id}" aria-label="${esc(e.name)} status" ${READONLY?'disabled':''}>${EQ_STATES.map(x=>`<option${x===(pend?eqPending.status:s.status)?' selected':''}>${x}</option>`).join('')}</select></td></tr>`+
+     (pend?`<tr class="pend"><td></td><td colspan="2"><form class="row" data-eqform="${e.id}"><input class="txt" id="eqNote" style="flex:1 1 12em" maxlength="160" placeholder="${eqPending.status==='Operational'?'Note (optional)':'What happened? (required)'}" aria-label="Note"><button class="btn sm primary" type="submit">Save</button><button class="btn sm" type="button" data-eqcancel>Cancel</button></form></td></tr>`:'')}).join('');
+  if(eqPending)$('#eqNote')?.focus();
+}
+let armed=null;
+function renderFaults(t){
+  const active=new Set(CFG.faults.filter(f=>t>=f.start&&t<f.end).map(f=>f.type));
+  $('#faults').innerHTML=FAULTS.map(f=>`<button class="btn${armed===f.id?' arm':''}" data-fault="${f.id}" aria-pressed="${active.has(f.id)}" title="${esc(f.desc)}" ${READONLY?'disabled':''}>${armed===f.id?'Confirm: '+(active.has(f.id)?'clear':'inject'):esc(f.name)}</button>`).join('')
+    +`<button class="btn${armed==='reboot'?' arm':''}" data-fault="reboot" title="The spacecraft computer resets once" ${READONLY?'disabled':''}>${armed==='reboot'?'Confirm: reboot':'Trigger OBC reboot'}</button>`
+    +(active.size?`<button class="btn" data-clearfaults ${READONLY?'disabled':''}>Clear all faults</button>`:'');
+  $('#simNote').textContent=MODE==='team'?'Team drill: faults affect everyone':'Training: only your browser';
+  $('#simText').textContent=MODE==='team'
+    ?'Faults injected here change the shared spacecraft for everyone on this console, and each one asks you to confirm. The console only sees their effect through telemetry, the way it would with real data.'
+    :'Faults change what the simulated spacecraft and link produce. The console only sees their effect through telemetry, the way it would with real data.';
+}
+function mergedLog(){
+  const ops=ENT.map(e=>({t:e.t,type:KIND_TYPE[e.kind],by:e.cs,msg:e.msg,e}));
+  return ops.concat(D.sys.filter(s=>s.t<=now()).map(s=>({...s,by:'system'}))).sort((a,b)=>a.t-b.t);
+}
+let lastLogSig='';
+function renderRecent(){
+  const all=mergedLog();
+  const sig=all.length+':'+(all.length?all[all.length-1].t:0);if(sig===lastLogSig)return;lastLogSig=sig;
+  $('#recent').innerHTML=all.slice(-8).reverse().map(e=>`<li><span class="mono">${fmtT(e.t)}</span><span class="tag ${e.type}">${e.type}</span><span>${e.by!=='system'?`<b>${esc(e.by)}</b> `:''}${esc(e.msg)}</span></li>`).join('')||'<li><span></span><span></span><span class="note">Nothing logged yet.</span></li>';
+  $('#logCount').textContent=' '+ENT.length;
+  if(tab==='log')renderLog();
+}
+function renderLog(){
+  const f=$('#logFilter').value;const rows=mergedLog().filter(e=>!f||e.type===f).slice(-600).reverse();
+  $('#logBody').innerHTML=rows.map(r=>`<tr><td class="mono">${fmtDT(r.t)}</td><td><span class="tag ${r.type}">${r.type}</span></td><td class="mono">${esc(r.by)}</td><td class="msg">${esc(r.msg)}</td><td class="mono" ${r.e?`title="${esc(r.e.h)}&#10;prev ${esc(r.e.p)}"`:''}>${r.e?esc(r.e.h.slice(0,12)):'<span class="note">derived</span>'}</td></tr>`).join('')||'<tr><td colspan="5" class="empty">No entries match.</td></tr>';
+}
+function renderTimeline(t){
+  const W=1000,H=104,top=8,base=64,ws=t-2*HOUR,we=t+10*HOUR,X=v=>(v-ws)/(we-ws)*W;
+  let g='';const k0=Math.floor((ws-EPOCH)/P)-1;
+  for(let k=k0;EPOCH+k*P<we;k++){const a=EPOCH+k*P+SUNM,b=EPOCH+(k+1)*P;if(b<ws||a>we)continue;g+=`<rect x="${X(Math.max(a,ws)).toFixed(1)}" y="${base+4}" width="${(X(Math.min(b,we))-X(Math.max(a,ws))).toFixed(1)}" height="6" fill="var(--stale)" fill-opacity=".45"/>`}
+  for(const f of CFG.faults){if(f.end<ws||f.start>Math.min(we,t))continue;const a=X(Math.max(f.start,ws)),b=X(Math.min(f.end,t));g+=`<rect x="${a.toFixed(1)}" y="${base+12}" width="${Math.max(2,b-a).toFixed(1)}" height="4" fill="var(--warn)"><title>${esc(FM[f.type].name)}</title></rect>`}
+  for(let h=Math.ceil(ws/HOUR)*HOUR;h<we;h+=HOUR){const x=X(h);g+=`<line x1="${x}" x2="${x}" y1="${top}" y2="${base}" stroke="var(--line)"/>`+(new Date(h).getUTCHours()%2===0?`<text x="${x}" y="${H-4}" fill="var(--muted)" font-size="11" font-family="IBM Plex Mono,monospace" text-anchor="middle">${fmtHM(h)}</text>`:'')}
+  g+=`<line x1="0" x2="${W}" y1="${base}" y2="${base}" stroke="var(--line)"/>`;
+  for(const p of passesIn(ws,we)){const x=X(p.aos),w=Math.max(3,X(p.los)-x),h=(p.max/90)*(base-top-14),cur=t>=p.aos&&t<p.los,s=D.pstats[p.k];
+    const op=p.los<t?.35:cur?1:.75;g+=`<rect x="${x.toFixed(1)}" y="${(base-h).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="var(--accent)" fill-opacity="${op}"><title>Pass ${p.k} · ${fmtHM(p.aos)}–${fmtHM(p.los)} · max ${p.max}°${s?` · ${s.rx}/${s.exp} frames`:''}</title></rect><text x="${(x+w/2).toFixed(1)}" y="${(base-h-3).toFixed(1)}" fill="var(--muted)" font-size="10" font-family="IBM Plex Mono,monospace" text-anchor="middle">${p.max}°</text>`}
+  const nx=X(t);g+=`<line x1="${nx}" x2="${nx}" y1="2" y2="${base+18}" stroke="var(--ink)" stroke-width="1.5"/><text x="${nx+4}" y="11" fill="var(--ink)" font-size="10.5" font-family="IBM Plex Sans Condensed,sans-serif" font-weight="600" letter-spacing=".08em">NOW</text>`;
+  $('#timeline').innerHTML=`<div style="padding:10px 14px 4px"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Pass timeline">${g}</svg></div>`;
+}
+function renderPasses(t){
+  const up=D.passes.filter(p=>p.aos>t).slice(0,3).reverse();
+  const past=D.passes.filter(p=>p.aos<=t).reverse();
+  const row=(p,upc)=>{const s=D.pstats[p.k],pct=s&&s.exp?s.rx/s.exp:null,cur=t>=p.aos&&t<p.los,c=Object.keys(CFG.checks[p.k]||{}).length;
+    return `<tr class="${upc?'upcoming':''}"><td class="mono">${p.k}${cur?' <span class="pill ok">Live</span>':''}</td><td class="mono">${fmtDT(p.aos)}</td><td class="mono">${fmtHM(p.los)}</td><td class="mono">${p.max}°</td>
+     <td class="mono">${s?`${s.rx}/${s.exp}`:'—'}</td><td>${pct==null?(upc?`<span class="note">in ${dur(p.aos-t)}</span>`:'—'):`<div class="row" style="gap:8px;flex-wrap:nowrap"><div class="bar ${pct<.8?(pct<.5?'crit':'warn'):''}" style="width:80px"><i style="width:${(pct*100).toFixed(0)}%"></i></div><span class="mono">${(pct*100).toFixed(0)}%</span></div>`}</td>
+     <td class="mono">${s&&s.maxRssi!=null?s.maxRssi.toFixed(1)+' dBm':'—'}</td><td class="mono">${s&&s.minSnr!=null?s.minSnr.toFixed(1)+' dB':'—'}</td><td class="mono">${s&&s.alerts?s.alerts:upc?'':'0'}</td><td class="mono">${c}/${NSTEPS}</td></tr>`};
+  $('#passBody').innerHTML=up.map(p=>row(p,true)).join('')+past.map(p=>row(p,false)).join('');
+}
+function renderClock(t){
+  $('#utc').textContent=fmtT(t);$('#date').textContent=fmtD(t);
+  const m=phaseOf(t);$('#orbit').textContent=(m<SUNM?'Sun · ':'Eclipse · ')+dur(m<SUNM?SUNM-m:P-m).slice(3)+' left';
+  $('#clockLabel').textContent=MODE==='team'?'UTC · live':'UTC · sim';
+}
+function renderContext(t){
+  const duty=CFG.duty;
+  const parts=[`<span>${MODE==='team'?'<b>Team console.</b> Shared live with everyone who can open this page.':'<b>Training console.</b> Private to this browser; nothing here reaches the team log.'}</span>`,
+    `<span>On duty: <b>${duty?esc(duty.cs):'nobody signed on'}</b>${duty?' since '+fmtHM(duty.t):''}</span>`];
+  if(MODE==='team'&&ROOM){parts.push(`<span class="peers"><span>On console now:</span>${peers.length?peers.map(p=>`<span class="peer"><i style="background:${esc(p.color||'var(--accent)')}"></i>${esc(p.cs||'—')}${p.isMe?' (you)':''}</span>`).join(''):'<span class="peer">just you</span>'}</span>`)}
+  $('#context').innerHTML=parts.join('');
+}
+function renderRO(){
+  const n=$('#roNote');n.hidden=!READONLY;
+  if(READONLY)n.textContent='You can watch this console but not act on it: acknowledging, logging and equipment changes need Contributor access from the page owner.';
+  lastAlertSig=lastProcSig=lastEqSig='';
+}
+
+/* ================= drawer ================= */
+let drawerCh=null;
+function openDrawer(id){drawerCh=id;$('#scrim').hidden=false;renderDrawer(true);setTimeout(()=>$('#drClose')?.focus(),0)}
+function closeDrawer(){const id=drawerCh;drawerCh=null;$('#scrim').hidden=true;document.getElementById('r-'+id)?.focus()}
+function chartSVG(c,t){
+  const segs=[];const byK=new Map();for(const f of D.frames){if(!byK.has(f.k))byK.set(f.k,[]);byK.get(f.k).push(f)}
+  const ks=[...byK.keys()].slice(-6);ks.forEach(k=>segs.push({p:passK(k),f:byK.get(k)}));
+  if(!segs.length)return '<p class="note">No frames in the last 36 hours.</p>';
+  const L=limitsAt(CFG,c.id,t).lim;
+  let vals=segs.flatMap(s=>s.f.map(f=>f.v[c.id]));let lo=Math.min(...vals),hi=Math.max(...vals);
+  if(L){const nn=L.filter(v=>v!=null);const near=nn.filter(v=>v>=lo-(hi-lo)*1.5&&v<=hi+(hi-lo)*1.5);near.forEach(v=>{lo=Math.min(lo,v);hi=Math.max(hi,v)})}
+  if(hi-lo<1e-6){lo-=1;hi+=1}const padv=(hi-lo)*0.08;lo-=padv;hi+=padv;
+  const W=720,H=250,L0=52,R0=10,T0=12,B0=34,gw=8,sw=(W-L0-R0-gw*(segs.length-1))/segs.length;
+  const Y=v=>T0+(hi-v)/(hi-lo)*(H-T0-B0);
+  let g='';
+  if(L){const [rl,yl,yh,rh]=L;const band=(a,b,col,op)=>{a=Math.max(a,lo);b=Math.min(b,hi);if(b>a)g+=`<rect x="${L0}" y="${Y(b).toFixed(1)}" width="${W-L0-R0}" height="${(Y(a)-Y(b)).toFixed(1)}" fill="${col}" fill-opacity="${op}"/>`};
+    if(rh!=null)band(rh,hi,'var(--crit)',.12);if(yh!=null)band(yh,rh??hi,'var(--warn)',.12);if(rl!=null)band(lo,rl,'var(--crit)',.12);if(yl!=null)band(rl??lo,yl,'var(--warn)',.12)}
+  for(let i=0;i<=4;i++){const v=lo+(hi-lo)*i/4,y=Y(v);g+=`<line x1="${L0}" x2="${W-R0}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" stroke="var(--line)"/><text x="${L0-6}" y="${(y+3.5).toFixed(1)}" text-anchor="end" font-size="10.5" font-family="IBM Plex Mono,monospace" fill="var(--muted)">${v.toFixed(c.dp>2?2:c.dp)}</text>`}
+  segs.forEach((s,i)=>{const x0=L0+i*(sw+gw),X=tt=>x0+(tt-s.p.aos)/(s.p.los-s.p.aos)*sw;
+    g+=`<rect x="${x0.toFixed(1)}" y="${T0}" width="${sw.toFixed(1)}" height="${H-T0-B0}" fill="none" stroke="var(--line)"/>`;
+    const pts=s.f.map(f=>X(f.t).toFixed(1)+','+Y(f.v[c.id]).toFixed(1));
+    let runs=[],cur=[],prev=null;s.f.forEach((f,j)=>{if(prev&&f.t-prev>FRAME*1.5){runs.push(cur);cur=[]}cur.push(pts[j]);prev=f.t});runs.push(cur);
+    runs.forEach(r=>{if(r.length>1)g+=`<polyline points="${r.join(' ')}" fill="none" stroke="var(--accent)" stroke-width="1.6"/>`;else if(r.length)g+=`<circle cx="${r[0].split(',')[0]}" cy="${r[0].split(',')[1]}" r="2" fill="var(--accent)"/>`});
+    g+=`<text x="${(x0+sw/2).toFixed(1)}" y="${H-18}" text-anchor="middle" font-size="10.5" font-family="IBM Plex Mono,monospace" fill="var(--ink)">Pass ${s.p.k}</text><text x="${(x0+sw/2).toFixed(1)}" y="${H-5}" text-anchor="middle" font-size="10" font-family="IBM Plex Mono,monospace" fill="var(--muted)">${fmtHM(s.p.aos)}</text>`});
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(c.name)} over the last ${segs.length} passes">${g}</svg>`;
+}
+function renderDrawer(full){
+  if(!drawerCh)return;const c=CHM[drawerCh],t=now(),s=chState(c,t),L=limitsAt(CFG,c.id,t);
+  const lastK=D.frames.length?D.frames[D.frames.length-1].k:null,lp=D.frames.filter(f=>f.k===lastK).map(f=>f.v[c.id]);
+  const stats=lp.length?[['Last pass min',Math.min(...lp)],['Last pass max',Math.max(...lp)],['Last pass mean',lp.reduce((a,b)=>a+b,0)/lp.length]]:[];
+  const related=D.alerts.filter(a=>a.ch===c.id).slice(-5).reverse();
+  if(full){
+    $('#drawer').innerHTML=`<div class="dr-head"><div class="stack" style="gap:4px"><span class="label">${c.sub} · ${c.id}</span><h3 id="drTitle">${esc(c.name)}</h3></div><button class="btn" id="drClose">Close</button></div>
+     <div class="dr-now" id="drNow"></div>
+     <div class="stack" style="gap:6px"><span class="label">Last six passes with data · shaded bands are caution and alarm zones</span><div class="chart" id="drChart"></div></div>
+     <div class="stats" id="drStats"></div>
+     <div class="panel"><div class="ph"><h2>Limits</h2><span class="sub" id="drLimBy"></span></div><form class="pb stack" id="limForm">
+       <div class="limform">${['Alarm low','Caution low','Caution high','Alarm high'].map((n,i)=>`<label><span class="label">${n}</span><input id="lim${i}" inputmode="decimal" placeholder="none" value="${L.lim&&L.lim[i]!=null?L.lim[i]:''}" ${READONLY?'disabled':''}></label>`).join('')}</div>
+       <input class="txt" id="limReason" maxlength="160" placeholder="Reason for the change (required)" ${READONLY?'disabled':''}>
+       <div class="row"><button class="btn primary" type="submit" ${READONLY?'disabled':''}>Save limits</button><button class="btn" type="button" id="limDefault" ${READONLY?'disabled':''}>Restore defaults</button><span class="note">Defaults: ${limTxt(c.lim)} ${esc(c.unit)}. Changes apply from now on and are signed in the log.</span></div>
+     </form></div>
+     <div class="panel"><div class="ph"><h2>Alerts on this channel</h2><span class="sub">Last 36 hours</span></div><div class="alerts" id="drAlerts"></div></div>`;
+  }
+  $('#drNow').innerHTML=`<span class="big">${s.v==null?'—':s.v.toFixed(c.dp)}</span><span class="mono" style="color:var(--muted)">${esc(c.unit)}</span><span class="pill ${ST_CLASS[s.st]}">${ST_LABEL[s.st]}</span><span class="note">${s.at?'Frame '+fmtT(s.at)+', '+sdur(t-s.at)+' ago':'No frames yet'}</span>`;
+  $('#drChart').innerHTML=chartSVG(c,t);
+  $('#drStats').innerHTML=stats.map(([l,v])=>`<div><span class="label">${l}</span><span class="mono">${v.toFixed(c.dp)} ${esc(c.unit)}</span></div>`).join('')+`<div><span class="label">Limits in force</span><span class="mono">${limTxt(L.lim)}</span></div>`;
+  $('#drLimBy').textContent=L.by?`Last changed by ${L.by.cs}, ${fmtDT(L.by.t)}`:'Using defaults';
+  $('#drAlerts').innerHTML=related.length?related.map(a=>`<div class="alert"><span class="pill ${a.event?'acc':a.sev}">${a.event?'Event':a.sev==='crit'?'Alarm':'Caution'}</span><span class="msg">${esc(a.msg)}</span><span></span><span class="meta">Raised ${fmtDT(a.raised)}${a.cleared&&!a.event?' · cleared '+fmtT(a.cleared):a.event?'':' · active'}</span></div>`).join(''):'<div class="empty">No alerts on this channel in the window.</div>';
+}
+
+/* ================= handover ================= */
+function handoverText(t,AV){
+  const lines=[],L=s=>lines.push(s);const shiftStart=CFG.duty?CFG.duty.t:t-8*HOUR;
+  const lf=lastFrame(),eqBad=EQUIP.map(e=>({e,s:statusAt(CFG,e.id,t)})).filter(x=>x.s.status!=='Operational');
+  const flagged=CH.map(c=>({c,s:chState(c,t)})).filter(x=>['warn','crit','flat','stale'].includes(x.s.st));
+  const g=id=>{const c=CHM[id];return lf?lf.v[id].toFixed(c.dp)+(c.unit?' '+c.unit:''):'—'};
+  const shiftLog=mergedLog().filter(e=>e.t>=shiftStart&&e.t<=t);
+  const passesShift=D.passes.filter(p=>p.los>shiftStart&&p.los<=t);
+  L('DOWNLINK DESK SHIFT HANDOVER · SIMULATED DATA, NOT FOR FLIGHT USE');
+  L(`Console   ${MODE==='team'?'Team (shared)':'Training (local)'} · PICO-1 · GS-01`);
+  L(`Shift     ${fmtD(shiftStart)} ${fmtHM(shiftStart)} → ${fmtHM(t)} (${sdur(t-shiftStart)})`);
+  L(`Outgoing  ${CFG.duty?CFG.duty.cs:(CS||'(no call sign)')}   Prepared by ${CS||'(no call sign)'}`);
+  L('');L('SPACECRAFT');
+  L(`  Last frame ${lf?fmtDT(lf.t)+' ('+sdur(t-lf.t)+' ago), pass '+lf.k:'none in window'}`);
+  L(`  Power    SOC ${g('soc')} · battery ${g('bat_v')} · array ${g('sol_i')} · load ${g('bus_i')}`);
+  L(`  Thermal  battery ${g('bat_t')} · OBC ${g('obc_t')} · panel +X ${g('pnl_t')}`);
+  L(`  OBC      uptime ${g('uptime')} · reboot counter ${g('reboots')}`);
+  L(flagged.length?'  Off-nominal channels:':'  All channels nominal at last frame.');
+  flagged.forEach(x=>L(`    - ${x.c.name}: ${x.s.v==null?'—':x.s.v.toFixed(x.c.dp)+' '+x.c.unit} [${ST_LABEL[x.s.st].toUpperCase()}]`));
+  L('');L(`OPEN ALERTS (${AV.open.length})`);if(!AV.open.length)L('  None.');
+  AV.open.forEach(a=>L(`  - [${a.event?'EVENT':a.sev==='crit'?'ALARM':'CAUTION'}] ${a.msg} · raised ${fmtHM(a.raised)} · ${a.event?'one-off':a.cleared==null?'active':'cleared'} · ${a.ack?'acked '+a.ack.cs:'NOT ACKNOWLEDGED'}`));
+  if(AV.shelved.length){L(`  Shelved (${AV.shelved.length}):`);AV.shelved.forEach(a=>L(`    - ${a.msg} · by ${a.shelved.cs} until ${fmtHM(a.shelved.until)}: ${a.shelved.reason}`))}
+  L('');L('PASSES THIS SHIFT');if(!passesShift.length)L('  None completed.');
+  passesShift.forEach(p=>{const s=D.pstats[p.k],c=Object.keys(CFG.checks[p.k]||{}).length;L(`  - ${p.k}  ${fmtHM(p.aos)}–${fmtHM(p.los)}  max ${p.max}°  frames ${s?s.rx+'/'+s.exp:'—'}  procedure ${c}/${NSTEPS}`)});
+  L('');L('UPCOMING PASSES');D.passes.filter(p=>p.aos>t).slice(0,3).forEach(p=>L(`  - ${p.k}  AOS ${fmtHM(p.aos)}  LOS ${fmtHM(p.los)}  max ${p.max}°`));
+  L('');L('GROUND EQUIPMENT');if(!eqBad.length)L('  All operational.');eqBad.forEach(x=>L(`  - ${x.e.name}: ${x.s.status}${x.s.note?' ('+x.s.note+')':''}`));
+  const lims=CH.filter(c=>limitsAt(CFG,c.id,t).by);if(lims.length){L('');L('NON-DEFAULT LIMITS');lims.forEach(c=>{const l=limitsAt(CFG,c.id,t);L(`  - ${c.name}: ${limTxt(l.lim)} (${l.by.cs}, ${fmtDT(l.by.t)})`)})}
+  const af=CFG.faults.filter(f=>t>=f.start&&t<f.end);L('');L('ACTIVE SIMULATOR FAULTS');L(af.length?'  '+af.map(f=>FM[f.type].name+' (since '+fmtHM(f.start)+')').join(', '):'  None.');
+  L('');L(`THIS SHIFT  ${shiftLog.filter(e=>e.e).length} signed entries · ${shiftLog.filter(e=>e.type==='ALERT'&&/^(ALARM|CAUTION|EVENT)/.test(e.msg)).length} alerts raised · ${shiftLog.filter(e=>e.e&&e.e.kind==='ack').length} acknowledged`);
+  L('');L('NOTES');const nt=($('#hoNotes').value||'').trim();L(nt?nt.split('\n').map(s=>'  '+s).join('\n'):'  (none)');
+  L('');L(`Log head ${ENT.length?ENT[ENT.length-1].h.slice(0,16):'genesis'} · ${ENT.length} signed entries`);
+  return lines.join('\n');
+}
+function renderHandover(){
+  const t=now(),AV=alertView(t);$('#hoText').value=handoverText(t,AV);
+  $('#dutyNote').textContent=CFG.duty?`On duty: ${CFG.duty.cs} since ${fmtHM(CFG.duty.t)}`:'Nobody is signed on';
+  $('#resetRow').hidden=MODE==='team';
+  $('#notesShared').textContent=MODE==='team'?'· shared draft, saved as you type':'· saved in this browser';
+}
+
+/* ================= export ================= */
+async function offerFile(filename,data,fallbackCopy,okMsg){
+  if(DL){try{await DL.save({filename,data});return}catch(e){if(e&&e.code==='declined')return;}}
+  copyText(fallbackCopy??data,okMsg||'Copied to the clipboard.');
+}
+function copyText(txt,okMsg){
+  const fb=()=>{const ta=document.createElement('textarea');ta.value=txt;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.select();let ok=false;try{ok=document.execCommand('copy')}catch(e){}ta.remove();toast(ok?okMsg:'Copy was blocked. Select the text and copy it manually.')};
+  try{navigator.clipboard.writeText(txt).then(()=>toast(okMsg),fb)}catch(e){fb()}
+}
+const csvQ=s=>'"'+String(s).replace(/"/g,'""')+'"';
+function telemetryCSV(){return ['utc,pass,'+CH.map(c=>c.id+(c.unit?'_'+c.unit.replace(/[^\w%]/g,''):'')).join(','),...D.frames.map(f=>[new Date(f.t).toISOString(),f.k,...CH.map(c=>f.v[c.id])].join(','))].join('\n')}
+function logCSV(){return ['utc,type,by,entry,hash,prev_hash',...mergedLog().map(r=>[new Date(r.t).toISOString(),r.type,csvQ(r.by),csvQ(r.msg),r.e?r.e.h:'',r.e?r.e.p:''].join(','))].join('\n')}
+
+/* ================= verification ================= */
+async function verify(){
+  const out=$('#verifyOut');out.className='verify';out.textContent='Checking…';
+  const ents=store.entries().slice();const byH=new Map();let badContent=[],missing=[],refs=new Map(),fnvMix=false;
+  for(const e of ents){if(HAS_SUBTLE!==(e.h.length===64))fnvMix=true;const h=await sha(canon(e));if(h!==e.h)badContent.push(e);byH.set(e.h,e);refs.set(e.p,(refs.get(e.p)||0)+1)}
+  const trunc=store.truncated&&store.truncated();
+  ents.forEach((e,i)=>{if(e.p!=='genesis'&&!byH.has(e.p)&&!(trunc&&i===0))missing.push(e)});
+  const forks=[...refs.values()].filter(n=>n>1).length;
+  if(!ents.length){out.textContent='No signed entries yet.';return}
+  if(fnvMix&&badContent.length){out.className='verify bad';out.textContent='Some entries were signed with a different hash function than this browser supports, so they cannot be checked here.';return}
+  if(!badContent.length&&!missing.length){out.className='verify ok';out.textContent=`Chain intact · ${ents.length} signed entries checked`+(forks?` · ${forks} point${forks>1?'s':''} where two operators wrote at the same moment (expected)`:'')+(trunc?' · oldest entries outside the loaded window':'');return}
+  out.className='verify bad';
+  out.textContent=[badContent.length?`${badContent.length} entr${badContent.length>1?'ies were':'y was'} changed after signing (first: ${fmtDT(badContent[0].t)} by ${badContent[0].cs})`:'',missing.length?`${missing.length} entr${missing.length>1?'ies point':'y points'} to a missing earlier entry, so something was deleted (near ${fmtDT(missing[0].t)})`:''].filter(Boolean).join(' · ');
+}
+
+/* ================= sound ================= */
+let actx=null,heardCrit=new Set(),soundPrimed=false;
+function beep(){if(!actx)return;try{const tt=actx.currentTime;[0,0.22].forEach(d=>{const o=actx.createOscillator(),g=actx.createGain();o.type='square';o.frequency.value=880;g.gain.value=0.04;o.connect(g).connect(actx.destination);o.start(tt+d);o.stop(tt+d+0.14)})}catch(e){}}
+function soundCheck(AV){const crit=AV.open.filter(a=>!a.ack&&a.sev==='crit').map(a=>a.id);let fresh=false;crit.forEach(id=>{if(!heardCrit.has(id)){heardCrit.add(id);fresh=true}});if(fresh&&soundPrimed&&SOUND)beep();soundPrimed=true}
+function renderSound(){const b=$('#sound');b.setAttribute('aria-pressed',SOUND);b.textContent=SOUND?'On':'Off'}
+
+/* ================= mode switching ================= */
+function setMode(m){
+  if(m==='team'&&!teamStore)return;
+  MODE=m;store=m==='team'?teamStore:trainStore;if(m==='team')teamStore.start();
+  $$('#modeSeg button').forEach(b=>b.setAttribute('aria-pressed',b.dataset.mode===m));
+  $('#speedFld').hidden=m==='team';
+  READONLY=m==='team'&&USER_CANWRITE===false;renderRO();
+  refreshCfg();heardCrit=new Set();soundPrimed=false;lastAlertSig=lastProcSig=lastEqSig=lastLogSig='';armed=null;eqPending=null;shelveOpen=null;
+  $('#hoNotes').value=store.notes().text||'';
+  savePrefs();updatePresence();tick(true);if(tab==='handover')renderHandover();
+}
+let USER_CANWRITE=null;
+
+/* ================= main loop ================= */
+function tick(force){
+  const t=now();
+  D=derive(CFG,t,MODE==='team'?COMMISSION:(clk.start||0));
+  const AV=alertView(t);
+  renderClock(t);renderStrip(t,AV);renderTlm(t);renderAlerts(t,AV);renderProc(t);renderEquip(t);
+  if(force||dirty.all){renderFaults(t);dirty.all=false}
+  renderRecent();renderContext(t);soundCheck(AV);
+  if(drawerCh)renderDrawer(false);
+}
+let slowT=0;
+function loop(){
+  tick(false);
+  const n=performance.now();if(n-slowT>1000){slowT=n;const t=now();renderTimeline(t);if(tab==='passes')renderPasses(t);if(MODE==='train')persistClock()}
+}
+
+/* ================= events ================= */
+function showTab(t){tab=t;$$('nav.tabs button').forEach(b=>b.setAttribute('aria-selected',b.dataset.tab===t));['console','passes','log','handover','about'].forEach(x=>$('#tab-'+x).hidden=x!==t);
+  if(t==='log'){renderLog()}if(t==='handover')renderHandover();if(t==='passes')renderPasses(now());savePrefs()}
+$('nav.tabs').addEventListener('click',e=>{const b=e.target.closest('button');if(b)showTab(b.dataset.tab)});
+$('#modeSeg').addEventListener('click',e=>{const b=e.target.closest('button');if(b&&!b.disabled&&b.dataset.mode!==MODE)setMode(b.dataset.mode)});
+
+document.addEventListener('click',async e=>{
+  const T=e.target;let el;
+  if((el=T.closest('[data-goto]')))showTab(el.dataset.goto);
+  if((el=T.closest('[data-chlink]'))){e.preventDefault();openDrawer(el.dataset.chlink);return}
+  if((el=T.closest('tr[data-ch]'))){openDrawer(el.dataset.ch);return}
+  if((el=T.closest('[data-ack]'))){const a=D.alerts.find(x=>x.id===el.dataset.ack);if(a)act('ack',{alert:a.id,sev:a.sev},`Acknowledged ${a.event?'event':a.sev==='crit'?'ALARM':'CAUTION'}: ${a.msg}`)}
+  if(T.closest('#ackAll')){const AV=alertView(now());const un=AV.open.filter(a=>!a.ack);for(const a of un)await act('ack',{alert:a.id,sev:a.sev},`Acknowledged ${a.event?'event':a.sev==='crit'?'ALARM':'CAUTION'}: ${a.msg}`)}
+  if((el=T.closest('[data-shelve]'))){if(!requireCs())return;shelveOpen=el.dataset.shelve;lastAlertSig='';tick();$('#shelfReason')?.focus()}
+  if(T.closest('#moreAlerts')){showAllAlerts=!showAllAlerts;lastAlertSig='';tick()}
+  if(T.closest('[data-shelfcancel]')){shelveOpen=null;lastAlertSig='';tick()}
+  if((el=T.closest('[data-unshelve]')))act('unshelve',{key:el.dataset.unshelve},`Unshelved alerts for ${el.dataset.unshelve}.`);
+  if((el=T.closest('[data-step]'))&&!el.disabled){act('check',{pass:+el.dataset.pass,step:el.dataset.step},`Pass ${el.dataset.pass} procedure: ${STEPS[el.dataset.step]}.`)}
+  if(T.closest('[data-eqcancel]')){eqPending=null;lastEqSig='';tick()}
+  if((el=T.closest('[data-fault]'))){if(!requireCs())return;const id=el.dataset.fault;
+    if(MODE==='team'&&armed!==id){armed=id;renderFaults(now());setTimeout(()=>{if(armed===id){armed=null;renderFaults(now())}},4000);return}
+    armed=null;const t=now();
+    if(id==='reboot'){await act('fault',{type:'reboot',fid:'rb-'+rid()},'Injected fault: OBC reboot. The console will see it on the next received frame.')}
+    else{const on=CFG.faults.filter(f=>f.type===id&&t>=f.start&&t<f.end);
+      if(on.length)await act('fault_end',{fids:on.map(f=>f.id)},`Cleared fault: ${FM[id].name}.`);else await act('fault',{type:id,fid:id+'-'+rid()},`Injected fault: ${FM[id].name}.`)}
+    renderFaults(now())}
+  if(T.closest('[data-clearfaults]')){const t=now(),on=CFG.faults.filter(f=>t>=f.start&&t<f.end);if(on.length)await act('fault_end',{fids:on.map(f=>f.id)},'Cleared all faults: '+[...new Set(on.map(f=>FM[f.type].name))].join(', ')+'.');renderFaults(now())}
+  if(T.closest('#drClose')||T===$('#scrim'))closeDrawer();
+  if(T.closest('#limDefault')){const c=CHM[drawerCh];[0,1,2,3].forEach(i=>$('#lim'+i).value=c.lim&&c.lim[i]!=null?c.lim[i]:'');$('#limReason').value=$('#limReason').value||'Restore defaults';$('#limReason').focus()}
+});
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'&&drawerCh){closeDrawer();return}
+  if((e.key==='Enter'||e.key===' ')&&e.target.matches&&e.target.matches('tr[data-ch]')){e.preventDefault();openDrawer(e.target.dataset.ch)}
+});
+document.addEventListener('submit',async e=>{
+  e.preventDefault();const f=e.target;
+  if(f.dataset.shelf){const reason=$('#shelfReason').value.trim();if(!reason){toast('Give a reason so the next operator knows why this alert is hidden.');$('#shelfReason').focus();return}
+    const a=D.alerts.find(x=>x.id===f.dataset.shelf);if(!a)return;const mins=+$('#shelfDur').value,key=a.key.split('@')[0];
+    if(await act('shelve',{key,until:Math.round(now()+mins*MIN),reason},`Shelved “${a.msg}” for ${sdur(mins*MIN)}: ${reason}`)){shelveOpen=null;lastAlertSig=''}}
+  if(f.dataset.eqform){const eq=EQM[f.dataset.eqform],note=$('#eqNote').value.trim(),prev=statusAt(CFG,eq.id,now()).status,st=eqPending.status;
+    if(st!=='Operational'&&!note){toast('Say what happened so the next operator has context.');$('#eqNote').focus();return}
+    if(await act('equip',{eq:eq.id,status:st,note},`${eq.name}: ${prev} → ${st}${note?' ('+note+')':''}.`+(LINK_EQ.includes(eq.id)&&st==='Down'?' Downlink chain interrupted.':''))){eqPending=null;lastEqSig=''}}
+  if(f.id==='limForm'){const c=CHM[drawerCh],vals=[0,1,2,3].map(i=>{const s=$('#lim'+i).value.trim();return s===''?null:Number(s)});
+    if(vals.some(v=>v!==null&&!isFinite(v))){toast('Limits must be numbers, or blank for none.');return}
+    const nn=vals.map((v,i)=>[v,i]).filter(x=>x[0]!=null);for(let i=1;i<nn.length;i++)if(nn[i][0]<=nn[i-1][0]){toast('Limits must increase from alarm low to alarm high.');return}
+    const reason=$('#limReason').value.trim();if(!reason){toast('Give a reason for the limit change.');$('#limReason').focus();return}
+    const old=limitsAt(CFG,c.id,now()).lim;
+    if(await act('limits',{ch:c.id,lim:vals},`Limits for ${c.name} changed from ${limTxt(old)} to ${limTxt(vals.every(v=>v==null)?null:vals)} ${c.unit}: ${reason}`)){$('#limReason').value='';toast('Limits saved and signed.')}}
+  if(f.id==='noteForm'){const v=$('#noteIn').value.trim();if(!v)return;if(await act('note',{},v))$('#noteIn').value=''}
+});
+$('#equip').addEventListener('change',e=>{const s=e.target.closest('select[data-eq]');if(!s)return;
+  if(!requireCs()){lastEqSig='';renderEquip(now());return}
+  const cur=statusAt(CFG,s.dataset.eq,now()).status;if(s.value===cur){eqPending=null}else eqPending={id:s.dataset.eq,status:s.value};lastEqSig='';renderEquip(now())});
+$('#speed').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;setSpeed(+b.dataset.s);renderSpeed()});
+function renderSpeed(){$$('#speed button').forEach(b=>b.setAttribute('aria-pressed',+b.dataset.s===clk.speed))}
+$('#skip').addEventListener('click',()=>{const t=simNow();if(passAt(t)){toast('Already in a pass. Skipping works between passes.');return}const np=nextPass(t);jumpTo(np.aos-30000);toast(`Skipped ${sdur(np.aos-30000-t)} to 30 s before AOS of pass ${np.k}.`);tick(true)});
+$('#cs').addEventListener('change',e=>{const v=e.target.value.trim().replace(/\s+/g,' ').slice(0,16);e.target.value=v;CS=v;savePrefs();updatePresence();lastAlertSig=lastProcSig=lastEqSig=''});
+$('#sound').addEventListener('click',()=>{SOUND=!SOUND;if(SOUND){try{actx=actx||new (window.AudioContext||window.webkitAudioContext)();actx.resume();beep()}catch(e){}}renderSound();savePrefs()});
+$('#logFilter').addEventListener('change',renderLog);
+$('#verify').addEventListener('click',verify);
+$('#copyCsv').addEventListener('click',()=>copyText(logCSV(),'Copied the audit trail as CSV.'));
+$('#dlJson').addEventListener('click',()=>offerFile(`downlink-desk-${MODE}-log-${fmtD(now())}.json`,JSON.stringify({mission:'PICO-1 (simulated)',console:MODE,exported:new Date().toISOString(),hash:HAS_SUBTLE?'sha256':'fnv',entries:store.entries()},null,2)));
+$('#dlTlm').addEventListener('click',()=>offerFile(`pico1-telemetry-${fmtD(now())}.csv`,telemetryCSV(),null,`Copied ${D.frames.length} frames as CSV.`));
+$('#hoCopy').addEventListener('click',()=>{renderHandover();copyText($('#hoText').value,'Handover report copied.')});
+$('#hoDl').addEventListener('click',()=>{renderHandover();offerFile(`handover-${fmtD(now())}-${fmtHM(now()).replace(':','')}.txt`,$('#hoText').value)});
+let notesT=null,notesBusy=false;
+$('#hoNotes').addEventListener('input',()=>{const t=now();$('#hoText').value=handoverText(t,alertView(t));clearTimeout(notesT);notesT=setTimeout(saveNotes,1200)});
+async function saveNotes(){if(notesBusy){notesT=setTimeout(saveNotes,800);return}if(MODE==='team'&&READONLY)return;notesBusy=true;try{await store.setNotes($('#hoNotes').value)}catch(e){}notesBusy=false}
+$('#hoSign').addEventListener('click',async()=>{
+  if(!requireCs())return;const nx=$('#hoNext').value.trim().slice(0,16);if(!nx){toast("Enter the incoming operator's call sign.");$('#hoNext').focus();return}
+  const t=now(),AV=alertView(t),txt=handoverText(t,AV),un=AV.open.filter(a=>!a.ack).length,notes=$('#hoNotes').value.trim();
+  const from=CFG.duty?CFG.duty.cs:CS;
+  if(await act('handover',{from,to:nx,report:await sha(txt),unacked:un},`Handover signed: ${from} → ${nx}. ${un} unacknowledged alert${un===1?'':'s'} passed on.${notes?' Notes: '+notes.replace(/\s+/g,' ').slice(0,600):''}`)){
+    $('#hoNext').value='';$('#hoNotes').value='';await saveNotes();
+    if(MODE==='train'){CS=nx;$('#cs').value=nx;savePrefs()}
+    renderHandover();toast(`Handover recorded. ${nx} is on duty.`)}
+});
+$('#takeDuty').addEventListener('click',async()=>{if(await act('duty',{},`${CS} took the console.`)){renderHandover();toast('You are on duty.')}});
+let resetArm=null;$('#reset').addEventListener('click',e=>{const b=e.currentTarget;
+  if(!resetArm){b.textContent='Confirm reset';b.classList.add('arm');resetArm=setTimeout(()=>{b.textContent='Reset training';b.classList.remove('arm');resetArm=null},4000);return}
+  clearTimeout(resetArm);resetArm=null;b.textContent='Reset training';b.classList.remove('arm');
+  trainStore.reset();clk=freshClock();anchorSim=clk.sim;anchorReal=performance.now();persistClock();$('#hoNotes').value='';refreshCfg();renderSpeed();tick(true);renderHandover();toast('Training reset. The simulator restarted four minutes into a pass.')});
+
+trainStore.on(()=>{if(MODE==='train')refreshCfg()});
+
+/* ================= capabilities ================= */
+let presenceT=null;
+function updatePresence(){if(!ROOM||MODE!=='team')return;clearTimeout(presenceT);presenceT=setTimeout(()=>{ROOM.presence({cs:CS||null,color:null}).catch(()=>{})},300)}
+async function initCaps(){
+  for(let i=0;i<30&&!(window.claude&&window.claude.use);i++)await new Promise(r=>setTimeout(r,100));
+  if(!(window.claude&&window.claude.use)){teamUnavailable();return}
+  const use=n=>window.claude.use(n).catch(()=>null);
+  const [db,user,room,dl]=await Promise.all([use('db'),use('user'),use('room'),use('downloads')]);
+  DL=dl;if(DL){$('#dlJson').hidden=false;$('#hoDl').hidden=false;$('#dlTlm').textContent='Download telemetry CSV'}
+  if(user){USER=user;try{UID=await user.id()}catch(e){}
+    try{const cw=await user.can('data.write');USER_CANWRITE=cw}catch(e){}
+    if(!CS){try{const me=await user.me();const ini=(me.name||'').split(/\s+/).filter(Boolean).map(w=>w[0]).join('').toUpperCase().slice(0,3);if(ini){CS=ini;$('#cs').value=ini;savePrefs()}}catch(e){}}}
+  if(!db){teamUnavailable();return}
+  DB=db;teamStore=DbStore(db);teamStore.on(w=>{if(MODE!=='team')return;if(w==='notes'){if(document.activeElement!==$('#hoNotes'))$('#hoNotes').value=teamStore.notes().text||''}else refreshCfg()});
+  const tb=$('#modeTeam');tb.disabled=false;tb.title='Shared, real-time console';
+  if(room){ROOM=room;room.onPeers(ch=>{peers=ch.peers.map(p=>({cs:p.presence&&typeof p.presence.cs==='string'?p.presence.cs.slice(0,16):'',isMe:p.isMe,color:null})).filter((p,i,a)=>!p.isMe||a.findIndex(q=>q.isMe)===i)},()=>{})}
+  if((prefs.mode||'team')==='team'){setMode('team');toast('Team console connected. Everyone with access to this page shares it.')}
+}
+function teamUnavailable(){const tb=$('#modeTeam');tb.disabled=true;tb.title='The team console needs you signed in to claude.ai with access to this page.'}
+
+/* ================= boot ================= */
+$('#cs').value=CS;buildTlm();renderSound();renderSpeed();
+$$('#modeSeg button').forEach(b=>b.setAttribute('aria-pressed',b.dataset.mode===MODE));
+$('#hoNotes').value=trainStore.notes().text||'';
+refreshCfg();tick(true);renderTimeline(now());
+if(tab!=='console')showTab(tab);
+setInterval(loop,250);
+window.addEventListener('pagehide',()=>{if(MODE==='train')persistClock()});
+initCaps();
+})();
+</script>
+
+</body>
+</html>
