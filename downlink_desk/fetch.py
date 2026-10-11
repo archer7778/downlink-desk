@@ -5,13 +5,15 @@ Run by a systemd timer (every `poll_minutes`). Safe to run by hand:
     python -m downlink_desk.fetch --force         # fetch now (still rate-limited)
     python -m downlink_desk.fetch --sat 62394     # just one satellite
     python -m downlink_desk.fetch --rebuild       # recompute values after editing a channels file
+    python -m downlink_desk.fetch --summary       # print the morning summary (and send it, with --send)
+    python -m downlink_desk.fetch --spaceweather  # refresh NOAA space weather now
 """
 import argparse
 import fcntl
 import json
 import sys
 
-from . import catalog
+from . import baseline, catalog, spacewx, summary
 from . import db as dbm
 from . import decode, notify, satnogs
 from .config import find_config
@@ -171,7 +173,12 @@ def fetch_one(conn, cfg, client, sat_row, force, log):
                      f"{sat_row['name']}: {new} new of {len(frames)} frames", norad)
     log(f"[{norad}] {sat_row['name']}: {new} new frames stored ({len(frames)} returned).")
     notify.fetch_ok(conn)
+    baseline.fill_phases(conn, norad)   # orbit phase for the new frames, before the model looks at them
     notify.after_fetch(conn, cfg, spec, new_ids, log, sat_row)
+    try:
+        notify.model_changes(conn, cfg, sat_row, baseline.compute(conn, spec, norad), log)
+    except Exception as e:   # the model is an extra; a bad channel must never stop fetching
+        log(f"[{norad}] Health model skipped: {e}")
     return 0
 
 
@@ -195,6 +202,13 @@ def run(cfg, force=False, log=print, only=None):
             if rc == 3:   # the key is bad for every satellite; stop
                 break
         catalog.refresh(conn, cfg, log)
+        spacewx.refresh(conn, cfg, log)
+        for sat_row in dbm.satellites(conn):   # catch up orbit phases (also after an upgrade)
+            baseline.fill_phases(conn, sat_row["norad"])
+        try:
+            summary.maybe_send(conn, cfg, log)
+        except Exception as e:
+            log(f"Morning summary skipped: {e}")
         return worst
     finally:
         fcntl.flock(lock, fcntl.LOCK_UN)
@@ -212,8 +226,10 @@ def rebuild(cfg, log=print):
         orbit = _satrec(conn, norad)
         if orbit is not None:
             for r in conn.execute("SELECT id, ts_ms FROM frames WHERE norad=?", (norad,)).fetchall():
-                conn.execute("UPDATE frames SET sunlit=?, sub_lat=?, sub_lon=? WHERE id=?",
+                conn.execute("UPDATE frames SET sunlit=?, sub_lat=?, sub_lon=?, phase_min=NULL, shadow_min=NULL WHERE id=?",
                              (*_context(orbit, r["ts_ms"]), r["id"]))
+            conn.commit()
+            baseline.fill_phases(conn, norad, limit=10**9)
         rows = conn.execute("SELECT id, ts_ms, fields_json FROM frames WHERE decoded_ok=1 AND norad=?", (norad,)).fetchall()
         conn.execute("DELETE FROM points WHERE norad=?", (norad,))
         for r in rows:
@@ -234,8 +250,22 @@ def main(argv=None):
     ap.add_argument("--sat", type=int, help="only this NORAD number")
     ap.add_argument("--rebuild", action="store_true", help="recompute channel values after editing a channels file")
     ap.add_argument("--catalog", action="store_true", help="refresh the satellite catalog now")
+    ap.add_argument("--summary", action="store_true", help="print the morning summary")
+    ap.add_argument("--send", action="store_true", help="with --summary: also push it to your phone now")
+    ap.add_argument("--spaceweather", action="store_true", help="refresh NOAA space weather now")
     a = ap.parse_args(argv)
     cfg = find_config(a.config)
+    if a.spaceweather:
+        spacewx.refresh(dbm.open_db(cfg), cfg, force=True)
+        sys.exit(0)
+    if a.summary:
+        conn = dbm.open_db(cfg)
+        s = summary.build(conn, cfg)
+        print(s["title"])
+        print(s["text"])
+        if a.send:
+            print("Sent." if summary.maybe_send(conn, cfg, force=True) else "Not sent: set ntfy_topic in config.toml.")
+        sys.exit(0)
     if a.catalog:
         catalog.refresh(dbm.open_db(cfg), cfg, force=True)
         sys.exit(0)

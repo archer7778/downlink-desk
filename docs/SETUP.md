@@ -73,7 +73,16 @@ To give an automatic satellite proper names, units and limits, copy `channels/gr
 3. On the Pi, edit `config.toml` and set `ntfy_topic = "downlink-desk-7f3k9q"` under `[notify]`. Optionally set `console_url = "http://groundpi.local:8080"` so tapping an alert opens the console.
 4. Nothing to restart; the next fetch uses it.
 
-You'll get a push for alarm-level limit breaks, restarts, a silent run of scheduled observations, and three failed fetches in a row. Each event is sent once.
+You'll get a push for alarm-level limit breaks, restarts, a silent run of scheduled observations, a channel drifting away from its learned normal, and three failed fetches in a row. Each event is sent once.
+
+Every morning you also get a summary of the last 24 hours. It goes out with the first fetch after `summary_hour` (default 7) in `timezone`. The Pi's own clock is usually UTC, so set your zone, for example:
+
+```
+summary_hour = 7
+timezone = "Asia/Ho_Chi_Minh"
+```
+
+Preview it any time with `.venv/bin/python -m downlink_desk.fetch --summary` (add `--send` to push it now).
 
 ## After updating
 

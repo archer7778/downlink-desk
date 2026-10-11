@@ -164,12 +164,70 @@ def eclipses(tle1, tle2, start_ms, end_ms, step_s=60):
     return out
 
 
+def period_min(sat):
+    """Orbital period in minutes (no_kozai is mean motion in radians per minute)."""
+    return 2 * math.pi / sat.no_kozai
+
+
+def in_saa(lat, lon):
+    """Roughly inside the South Atlantic Anomaly at low-Earth-orbit heights, where the inner
+    radiation belt dips closest to Earth and spacecraft see the most particle hits and upsets.
+    An ellipse around the region (centre about 25°S 45°W); the real edge depends on altitude
+    and drifts slowly west over the years, so treat this as approximate."""
+    if lat is None or lon is None:
+        return False
+    return ((lat + 25) / 22) ** 2 + ((lon + 45) / 60) ** 2 <= 1
+
+
+def sun_phases(tle1, tle2, times):
+    """For each time: (minutes since the satellite last came out of Earth's shadow,
+    length of that orbit's shadow in minutes). Minutes since sunrise is a position in the
+    day/night cycle of the orbit, which is what drives a small satellite's temperatures.
+    (None, 0.0) in a season with no shadow at all; (None, None) if it can't be worked out."""
+    import bisect
+    sat = Satrec.twoline2rv(tle1, tle2)
+    P = period_min(sat) * 60_000
+    ts = sorted(set(times))
+    out = {}
+    i = 0
+    while i < len(ts):
+        j = i
+        while j + 1 < len(ts) and ts[j + 1] - ts[j] < P:
+            j += 1
+        a, b = ts[i] - int(2.2 * P), ts[j] + 60_000
+        ecl = [e for e in eclipses(tle1, tle2, a, b, 30) if e[1] < b]   # drop one still going at the end
+        rises = [e[1] for e in ecl]
+        lens = [None if e[0] <= a else (e[1] - e[0]) / 60_000 for e in ecl]   # first may be cut off
+        for t in ts[i:j + 1]:
+            k = bisect.bisect_right(rises, t) - 1
+            if k >= 0 and t - rises[k] <= 1.05 * P:
+                ln = lens[k] if lens[k] is not None else (lens[k + 1] if k + 1 < len(lens) else None)
+                out[t] = (round((t - rises[k]) / 60_000, 2), None if ln is None else round(ln, 1))
+            elif not ecl:
+                out[t] = (None, 0.0)
+            else:
+                out[t] = (None, None)
+        i = j + 1
+    return out
+
+
+def shadow_minutes(tle1, tle2, t_ms):
+    """Length of the shadow in the orbit around t_ms (0 in a full-sunlight season)."""
+    sat = Satrec.twoline2rv(tle1, tle2)
+    P = period_min(sat) * 60_000
+    a = t_ms - int(1.2 * P)
+    full = [e for e in eclipses(tle1, tle2, a, t_ms + int(1.2 * P), 30) if e[0] > a and e[1] < t_ms + int(1.2 * P)]
+    return round((full[0][1] - full[0][0]) / 60_000, 1) if full else 0.0
+
+
 def now_state(tle1, tle2, t_ms):
     """Current position, sunlight, and when sunlight next changes (searches 2 h ahead)."""
     sat = Satrec.twoline2rv(tle1, tle2)
     st = state(sat, t_ms)
     if st is None:
         return None
+    st["saa"] = in_saa(st["lat"], st["lon"])
+    st["period_min"] = round(period_min(sat), 2)
     t = t_ms
     while t < t_ms + 2 * 3600_000:
         t += 30_000

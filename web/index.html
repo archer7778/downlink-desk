@@ -237,6 +237,25 @@ textarea{width:100%;border:1px solid var(--line);border-radius:5px;background:va
 .card .row{margin-top:auto}
 .biocard{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px 18px;align-items:start}
 .biocard p{margin:0;max-width:72ch}
+/* live feed, model, space weather, summary */
+.feed{list-style:none;margin:0;padding:0;max-height:330px;overflow:auto}
+.feed li{display:grid;grid-template-columns:4.6em minmax(0,1fr);gap:2px 10px;padding:7px 14px;border-top:1px solid var(--line);font-size:13px}
+.feed li:first-child{border-top:0}
+.feed li .mono{font-size:12px;color:var(--muted)}
+.feed li .d{grid-column:2;font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+.feed li.new{animation:flash 2.4s ease-out}
+@keyframes flash{0%{background:var(--accent-bg)}100%{background:transparent}}
+.livedot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--stale);margin-right:6px;vertical-align:middle}
+.livedot.on{background:var(--live);animation:pulse 2s ease-in-out infinite}
+@media (prefers-reduced-motion:reduce){.livedot.on,.feed li.new{animation:none}}
+.dt tr.mrow{cursor:pointer} .dt tr.mrow:hover td{background:var(--sunk)}
+.dt td.num{text-align:right;font-family:var(--f-mono);font-size:12.5px;white-space:nowrap}
+.swgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;padding:12px 14px 4px}
+.swgrid div{display:flex;flex-direction:column;gap:2px;padding:8px 10px;background:var(--sunk);border-radius:5px;min-width:0}
+.swgrid .v{font:600 17px/1.2 var(--f-display);display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.swgrid .s{font-size:11.5px;color:var(--muted)}
+pre.sum{margin:0;padding:12px 14px;font:12.5px/1.6 var(--f-mono);white-space:pre-wrap;overflow-wrap:anywhere}
+.badge{display:inline-block;font:600 10px/1 var(--f-display);letter-spacing:.08em;text-transform:uppercase;padding:3px 5px;border-radius:3px;background:var(--warn-bg);color:var(--warn);margin-left:4px;vertical-align:1px}
 #toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(18px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:9px 14px;border-radius:6px;font-size:13px;max-width:calc(100% - 32px);box-shadow:0 4px 16px rgba(0,0,0,.2);z-index:40}
 </style>
 </head>
@@ -282,6 +301,11 @@ textarea{width:100%;border:1px solid var(--line);border-radius:5px;background:va
           <div class="tlm"><table><thead><tr><th>Channel</th><th style="text-align:right">Value</th><th></th><th>Last 30 samples</th><th>Limits</th><th>Status</th><th style="text-align:right">Age</th></tr></thead><tbody id="tlmBody"></tbody></table></div>
         </div>
         <div class="panel">
+          <div class="ph"><h2>Health model</h2><span class="sub" id="modelNote">Learns what normal looks like for every point in the orbit, then flags slow drifts that fixed limits miss</span></div>
+          <div class="dt"><table style="min-width:640px"><thead><tr><th>Channel</th><th>Status</th><th style="text-align:right">Latest vs normal</th><th style="text-align:right" id="modelRecentTh">Last 2 days</th><th style="text-align:right">Trend / week</th><th style="text-align:right">Samples</th></tr></thead><tbody id="modelBody"></tbody></table></div>
+          <div class="pb"><p class="note">A small satellite warms in sunlight and cools in Earth’s shadow every orbit, so whether a reading is normal depends on where in that cycle it was taken. For each channel the Pi learns the typical value at each point of the cycle (minutes since the satellite last came out of shadow), corrects for longer or shorter shadows through the seasons, and compares the last two days with the three weeks before. Select a row for its orbit profile.</p></div>
+        </div>
+        <div class="panel">
           <div class="ph"><h2>Expected vs received</h2><span class="sub" id="obsNote">SatNOGS stations scheduled to listen, and what each one delivered</span></div>
           <div class="dt"><table style="min-width:600px"><thead><tr><th>When (UTC)</th><th>Station</th><th>Max el</th><th>Result</th></tr></thead><tbody id="obsBody"></tbody></table></div>
         </div>
@@ -304,12 +328,25 @@ textarea{width:100%;border:1px solid var(--line);border-radius:5px;background:va
           <details class="more"><summary id="closedSum">Recently closed</summary><div class="alerts" id="closed"></div></details>
         </div>
         <div class="panel">
+          <div class="ph"><h2>Live feed</h2><span class="sub"><span class="livedot" id="liveDot"></span><span id="liveNote">Connecting…</span></span></div>
+          <ul class="feed" id="feed"><li><span></span><span class="note">Frames appear here the moment the Pi stores them.</span></li></ul>
+        </div>
+        <div class="panel">
           <div class="ph"><h2>Daily check</h2><span class="sub" id="procNote"></span></div>
           <div id="proc"></div>
         </div>
         <div class="panel">
           <div class="ph"><h2>Ground segment</h2><span class="sub">Top two update themselves</span></div>
           <div style="overflow-x:auto"><table class="equip"><tbody id="equip"></tbody></table></div>
+        </div>
+        <div class="panel">
+          <div class="ph"><h2>Space weather</h2><span class="sub" id="swNote">NOAA Space Weather Prediction Center</span></div>
+          <div id="sw"><div class="empty">Loading…</div></div>
+        </div>
+        <div class="panel">
+          <div class="ph"><h2>Morning summary</h2><button class="btn sm" id="sumSend">Send to phone now</button></div>
+          <pre class="sum" id="sumText">Loading…</pre>
+          <div class="pb" style="padding-top:0"><p class="note" id="sumNote"></p></div>
         </div>
       </div>
     </div>
@@ -377,7 +414,7 @@ textarea{width:100%;border:1px solid var(--line);border-radius:5px;background:va
     </div>
     <div class="panel pb stack" style="padding:18px">
       <h2>Credits</h2>
-      <p>Telemetry comes from the <a href="https://satnogs.org" target="_blank" rel="noopener">SatNOGS</a> network run by the Libre Space Foundation and its volunteer station operators. SatNOGS data is shared under the <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener">CC BY-SA 4.0</a> licence. Frames are decoded with <a href="https://pypi.org/project/satnogs-decoders/" target="_blank" rel="noopener">satnogs-decoders</a>. Orbit data comes through SatNOGS from public sources. <span id="satCredit"></span></p>
+      <p>Telemetry comes from the <a href="https://satnogs.org" target="_blank" rel="noopener">SatNOGS</a> network run by the Libre Space Foundation and its volunteer station operators. SatNOGS data is shared under the <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener">CC BY-SA 4.0</a> licence. Frames are decoded with <a href="https://pypi.org/project/satnogs-decoders/" target="_blank" rel="noopener">satnogs-decoders</a>. Orbit data comes through SatNOGS from public sources. Space weather (geomagnetic Kp index, GOES X-ray flux and 10.7 cm solar flux) comes from <a href="https://www.swpc.noaa.gov" target="_blank" rel="noopener">NOAA’s Space Weather Prediction Center</a>. The South Atlantic Anomaly outline is an approximation. <span id="satCredit"></span></p>
     </div>
     <div class="panel">
       <div class="ph"><h2>Channel map</h2><span class="sub">From the channels file in config</span></div>
@@ -427,7 +464,7 @@ async function api(path,opts){
 const prefs=lsGet('downlinkdesk.live.prefs',{});
 let CS=prefs.cs||'',PASS=prefs.pass||'',SOUND=!!prefs.sound,tab=prefs.tab||'console';
 let CONF=null,CH=[],CHM={},SERIES={},FRAMES=[],FRAME_IDS=new Set(),LOG=[],HEALTH=null,PASSES=null,NOTES={text:''};
-let OBS=null,ECL=[],NOW=null,SUNLIT_AT=new Map(),FLEET=[],CATALOG=null;
+let OBS=null,ECL=[],NOW=null,SUNLIT_AT=new Map(),FLEET=[],CATALOG=null,MODEL=null,SW=null,SUM=null,FEED=[],PROFILE=null;
 const qsat=new URLSearchParams(location.search).get('sat');
 let SAT=qsat?+qsat:(lsGet('downlinkdesk.sat',null));
 const GLOBAL_API=['/api/log','/api/log/verify','/api/notes','/api/satellites','/api/catalog','/api/satellites/track','/api/satellites/untrack','/api/export/log.json'];
@@ -636,7 +673,7 @@ function renderLog(){const f=$('#logFilter').value,rows=mergedLog(Date.now()).fi
   $('#logBody').innerHTML=rows.map(r=>`<tr><td class="mono">${fmtDT(r.t)}</td><td><span class="tag ${r.type}">${r.type}</span></td><td class="mono">${esc(r.by)}</td><td class="msg">${esc(r.msg)}</td><td class="mono" ${r.e?`title="#${r.e.seq} ${esc(r.e.hash)}"`:''}>${r.e?'#'+r.e.seq+' '+esc(r.e.hash.slice(0,10)):'<span class="note">derived</span>'}</td></tr>`).join('')||'<tr><td colspan="5" class="empty">No entries match.</td></tr>'}
 function renderContext(now){
   const parts=[`<span>On duty: <b>${CFG.duty?esc(CFG.duty.cs):'nobody signed on'}</b>${CFG.duty?' since '+fmtDT(CFG.duty.t):''}</span>`];
-  if(NOW&&NOW.lat!=null){const ch=NOW.next_change_ms;parts.push(`<span>${esc(CONF.satellite.name)} now: <b>${Math.abs(NOW.lat).toFixed(1)}°${NOW.lat>=0?'N':'S'} ${Math.abs(NOW.lon).toFixed(1)}°${NOW.lon>=0?'E':'W'}</b>, ${Math.round(NOW.alt_km)} km up, <b>${NOW.sunlit?'in sunlight':'in eclipse'}</b>${ch&&ch>now?` · ${NOW.sunlit?'eclipse':'sunrise'} in ${Math.max(1,Math.round((ch-now)/MIN))} min`:''}</span>`)}
+  if(NOW&&NOW.lat!=null){const ch=NOW.next_change_ms;parts.push(`<span>${esc(CONF.satellite.name)} now: <b>${Math.abs(NOW.lat).toFixed(1)}°${NOW.lat>=0?'N':'S'} ${Math.abs(NOW.lon).toFixed(1)}°${NOW.lon>=0?'E':'W'}</b>, ${Math.round(NOW.alt_km)} km up, <b>${NOW.sunlit?'in sunlight':'in eclipse'}</b>${NOW.saa?', <b>over the South Atlantic Anomaly</b>':''}${ch&&ch>now?` · ${NOW.sunlit?'eclipse':'sunrise'} in ${Math.max(1,Math.round((ch-now)/MIN))} min`:''}</span>`)}
   if(HEALTH){const next=HEALTH.last_attempt_ms?HEALTH.last_attempt_ms+CONF.poll_minutes*MIN:null;parts.push(`<span>Last fetch ${HEALTH.last_attempt_ms?ago(now-HEALTH.last_attempt_ms)+' ago':'never'}${next&&next>now?` · next in about ${Math.ceil((next-now)/MIN)} min`:''}</span>`,`<button class="btn sm" id="fetchNow" ${HEALTH.fetching?'disabled':''}>${HEALTH.fetching?'Fetching…':'Fetch now'}</button>`)}
   $('#context').innerHTML=parts.join('');
   const lb=$('#livebar');lb.classList.toggle('down',!online);$('#liveText').textContent=online?`Live · ${CONF.satellite.name} via SatNOGS`:'Lost contact with the Pi · retrying';
@@ -719,7 +756,7 @@ function renderFrames(){
   const types=[...new Set(frameRows.map(f=>f.type))],sel=$('#frameFilter'),cur=sel.value;
   sel.innerHTML='<option value="">All frames</option>'+types.map(t=>`<option${t===cur?' selected':''}>${esc(t)}</option>`).join('');
   const rows=frameRows.filter(f=>!cur||f.type===cur);
-  $('#frameBody').innerHTML=rows.map(f=>`<tr class="fr" data-frame="${f.id}"><td class="mono">${fmtDT(f.t)}</td><td>${esc(f.observer||'—')}</td><td class="mono" style="white-space:nowrap">${f.sunlit==null?'—':(f.sunlit?'Sunlit':'Eclipse')}${f.sub_lat!=null?` · ${f.sub_lat.toFixed(0)}°, ${f.sub_lon.toFixed(0)}°`:''}</td><td><span class="pill ${f.ok?'acc':''}">${esc(f.type)}</span></td><td class="mono" style="white-space:normal">${keyVals(f).map(k=>`${esc(k.c.name)} <b>${esc(k.v)}</b>`).join(' · ')||'<span class="note">—</span>'}</td></tr>`+
+  $('#frameBody').innerHTML=rows.map(f=>`<tr class="fr" data-frame="${f.id}"><td class="mono">${fmtDT(f.t)}</td><td>${esc(f.observer||'—')}</td><td class="mono" style="white-space:nowrap">${f.sunlit==null?'—':(f.sunlit?'Sunlit':'Eclipse')}${f.phase!=null?` · ${Math.round(f.phase)} min after sunrise`:''}${f.sub_lat!=null?` · ${f.sub_lat.toFixed(0)}°, ${f.sub_lon.toFixed(0)}°`:''}${f.saa?'<span class="badge" title="Over the South Atlantic Anomaly, where radiation is highest">SAA</span>':''}</td><td><span class="pill ${f.ok?'acc':''}">${esc(f.type)}</span></td><td class="mono" style="white-space:normal">${keyVals(f).map(k=>`${esc(k.c.name)} <b>${esc(k.v)}</b>`).join(' · ')||'<span class="note">—</span>'}</td></tr>`+
     (openFrame===f.id?`<tr><td colspan="5"><div class="fields">${Object.entries(f.fields).map(([k,v])=>`<div><span>${esc(k)}</span> ${esc(v)}</div>`).join('')||'<div><span>No decoded fields</span></div>'}</div><div class="hex">${esc(f.hex)}</div></td></tr>`:'')).join('')||'<tr><td colspan="5" class="empty">No frames stored yet.</td></tr>';
 }
 
@@ -734,18 +771,19 @@ function renderPasses(now){
 
 /* ---------- drawer ---------- */
 let drawerCh=null;
-function openDrawer(id){if(!CHM[id])return;drawerCh=id;$('#scrim').hidden=false;renderDrawer(true);setTimeout(()=>$('#drClose')?.focus(),0)}
+function openDrawer(id){if(!CHM[id])return;drawerCh=id;PROFILE=null;$('#scrim').hidden=false;renderDrawer(true);loadProfile(id);setTimeout(()=>$('#drClose')?.focus(),0)}
 function closeDrawer(){const id=drawerCh;drawerCh=null;$('#scrim').hidden=true;document.getElementById('r-'+id)?.focus()}
 function chartSVG(c,now){
   const ser=(SERIES[c.id]||[]).filter(p=>p[0]>=now-7*DAY);if(ser.length<1)return '<p class="note">No samples in the last 7 days.</p>';
   const L=limitsAt(c.id,now).lim;let lo=Math.min(...ser.map(p=>p[1])),hi=Math.max(...ser.map(p=>p[1]));
   if(L){L.filter(v=>v!=null).forEach(v=>{const span=Math.max(hi-lo,1);if(v>=lo-span&&v<=hi+span){lo=Math.min(lo,v);hi=Math.max(hi,v)}})}
   if(hi-lo<1e-6){lo-=1;hi+=1}const pd=(hi-lo)*.08;lo-=pd;hi+=pd;
-  const W=740,H=250,L0=52,R0=10,T0=12,B0=26,ws=now-7*DAY,X=t=>L0+(t-ws)/(now-ws)*(W-L0-R0),Y=v=>T0+(hi-v)/(hi-lo)*(H-T0-B0);let g='';
+  const W=740,H=250,L0=52,R0=10,T0=16,B0=26,ws=now-7*DAY,X=t=>L0+(t-ws)/(now-ws)*(W-L0-R0),Y=v=>T0+(hi-v)/(hi-lo)*(H-T0-B0);let g='';
   if(L){const [rl,yl,yh,rh]=L;const band=(a,b,col)=>{a=Math.max(a,lo);b=Math.min(b,hi);if(b>a)g+=`<rect x="${L0}" y="${Y(b).toFixed(1)}" width="${W-L0-R0}" height="${(Y(a)-Y(b)).toFixed(1)}" fill="${col}" fill-opacity=".12"/>`};
     if(rh!=null)band(rh,hi,'var(--crit)');if(yh!=null)band(yh,rh??hi,'var(--warn)');if(rl!=null)band(lo,rl,'var(--crit)');if(yl!=null)band(rl??lo,yl,'var(--warn)')}
   for(const [a,b] of ECL){if(b<ws||a>now)continue;g+=`<rect x="${X(Math.max(a,ws)).toFixed(1)}" y="${T0}" width="${Math.max(1,X(Math.min(b,now))-X(Math.max(a,ws))).toFixed(1)}" height="${H-T0-B0}" fill="var(--stale)" fill-opacity=".13"/>`}
   for(let i=0;i<=4;i++){const v=lo+(hi-lo)*i/4,y=Y(v);g+=`<line x1="${L0}" x2="${W-R0}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" stroke="var(--line)"/><text x="${L0-6}" y="${(y+3.5).toFixed(1)}" text-anchor="end" font-size="10.5" font-family="IBM Plex Mono,monospace" fill="var(--muted)">${v.toFixed(Math.min(c.dp,2))}</text>`}
+  if(SW&&SW.series.kp)for(const [t,v] of SW.series.kp){if(v<4.67||t+3*HOUR<ws||t>now)continue;g+=`<rect x="${X(Math.max(t,ws)).toFixed(1)}" y="${T0-8}" width="${Math.max(2,X(Math.min(t+3*HOUR,now))-X(Math.max(t,ws))).toFixed(1)}" height="5" fill="var(--crit)" fill-opacity="${Math.min(1,.35+(v-4.67)/5).toFixed(2)}"><title>Geomagnetic storm · Kp ${v.toFixed(1)} · ${fmtDT(t)}</title></rect>`}
   for(let d=Math.ceil(ws/DAY)*DAY;d<now;d+=DAY){const x=X(d);g+=`<line x1="${x}" x2="${x}" y1="${T0}" y2="${H-B0}" stroke="var(--line)" stroke-dasharray="2 3"/><text x="${x}" y="${H-8}" text-anchor="middle" font-size="10.5" font-family="IBM Plex Mono,monospace" fill="var(--muted)">${fmtD(d).slice(5)}</text>`}
   let run=[];const flush=()=>{if(run.length>1)g+=`<polyline points="${run.join(' ')}" fill="none" stroke="var(--accent)" stroke-width="1.5"/>`;run=[]};let prev=null;
   for(const [t,v] of ser){if(prev!=null&&t-prev>45*MIN)flush();run.push(X(t).toFixed(1)+','+Y(v).toFixed(1));prev=t}flush();
@@ -757,7 +795,8 @@ function renderDrawer(full){
   if(full){
     $('#drawer').innerHTML=`<div class="dr-head"><div class="stack" style="gap:4px"><span class="label">${esc(c.sub)} · ${esc((c.fields||[c.field]).join(', '))}</span><h3 id="drTitle">${esc(c.name)}</h3></div><button class="btn" id="drClose">Close</button></div>
      <div class="dr-now" id="drNow"></div>
-     <div class="stack" style="gap:6px"><span class="label">Last 7 days · coloured bands are caution and alarm zones, grey bands are eclipse, dark dots were taken in eclipse</span><div class="chartbox" style="padding:0" id="drChart"></div></div>
+     <div class="stack" style="gap:6px"><span class="label">Last 7 days · coloured bands are caution and alarm zones, grey bands are eclipse, dark dots were taken in eclipse, red ticks along the top are geomagnetic storms</span><div class="chartbox" style="padding:0" id="drChart"></div></div>
+     <div class="stack" style="gap:6px"><span class="label">Orbit profile · value against minutes since the satellite came out of Earth’s shadow · line and band are the learned normal (median, 10–90%), grey dots the samples it learned from, orange dots the last few days</span><div class="chartbox" style="padding:0" id="drProfile"><p class="note">Loading…</p></div><p class="note" id="drModel"></p></div>
      <div class="stats" id="drStats"></div>
      <div class="panel"><div class="ph"><h2>Limits</h2><span class="sub" id="drLimBy"></span></div><form class="pb stack" id="limForm">
        <div class="limform">${['Alarm low','Caution low','Caution high','Alarm high'].map((n,i)=>`<label><span class="label">${n}</span><input id="lim${i}" inputmode="decimal" placeholder="none" value="${L.lim&&L.lim[i]!=null?L.lim[i]:''}"></label>`).join('')}</div>
@@ -766,6 +805,7 @@ function renderDrawer(full){
        <p class="note" id="learnNote"></p>
      </form></div>
      <div class="panel"><div class="ph"><h2>Alerts on this channel</h2></div><div class="alerts" id="drAlerts"></div></div>`;
+    renderProfile();
   }
   $('#drNow').innerHTML=`<span class="big">${s.v==null?'—':(+s.v).toFixed(c.dp)}</span><span class="mono" style="color:var(--muted)">${esc(c.unit)}</span><span class="pill ${ST_CLASS[s.st]}">${ST_LABEL[s.st]}</span><span class="note">${s.at?'From frame at '+fmtDT(s.at)+', '+ago(now-s.at)+' ago':'No samples yet'}</span>`;
   $('#drChart').innerHTML=chartSVG(c,now);
@@ -828,12 +868,118 @@ let actx=null,heard=new Set(),primed=false;
 function beep(){if(!actx)return;try{const t=actx.currentTime;[0,.22].forEach(d=>{const o=actx.createOscillator(),g=actx.createGain();o.type='square';o.frequency.value=880;g.gain.value=.04;o.connect(g).connect(actx.destination);o.start(t+d);o.stop(t+d+.14)})}catch(e){}}
 function soundCheck(AV){let fresh=false;AV.open.filter(a=>!a.ack&&a.sev==='crit').forEach(a=>{if(!heard.has(a.id)){heard.add(a.id);fresh=true}});if(fresh&&primed&&SOUND)beep();primed=true}
 
+/* ---------- health model ---------- */
+const M_ST={drift:['warn','Drifting'],watch:['acc','Watch'],normal:['ok','Normal'],quiet:['','Quiet'],learning:['','Learning']};
+const M_ORDER={drift:0,watch:1,normal:2,quiet:3,learning:4};
+const sgn=(v,dp)=>(v>=0?'+':'−')+Math.abs(v).toFixed(dp);
+let lastModelSig='';
+function renderModel(){
+  if(!MODEL){$('#modelBody').innerHTML='<tr><td colspan="6" class="empty">Loading the model…</td></tr>';return}
+  const sig=JSON.stringify(MODEL.channels.map(c=>[c.id,c.status,c.shift,c.n_base,c.n_recent]));if(sig===lastModelSig)return;lastModelSig=sig;
+  $('#modelRecentTh').textContent=`Last ${MODEL.recent_days} days`;
+  const rows=[...MODEL.channels].sort((a,b)=>(M_ORDER[a.status]-M_ORDER[b.status])||(Math.abs(b.z||0)-Math.abs(a.z||0)));
+  $('#modelBody').innerHTML=rows.map(c=>{const [cls,lab]=M_ST[c.status]||['',c.status];const u=c.unit?' '+c.unit:'';const dp=Math.min(c.dp,2);
+    const lt=c.latest?`${sgn(c.latest.value-c.latest.expected,dp)}${u} <span class="note">(${sgn(c.latest.sigmas,1)}σ)</span>`:'—';
+    const sh=c.shift!=null?`${sgn(c.shift,dp)}${u} <span class="note">(${sgn(c.z,1)}σ)</span>`:(c.status==='quiet'?'<span class="note">too few recent</span>':'—');
+    const tr=c.trend_per_week!=null?sgn(c.trend_per_week,dp)+u:'—';
+    const lb=c.status==='learning'?`Learning · ${c.need} more`:lab;
+    return `<tr class="mrow" data-mch="${esc(c.id)}"><td>${esc(c.name)}${c.n_unusual?`<span class="badge" title="Readings far from the model, beyond any drift">${c.n_unusual} odd</span>`:''}</td><td><span class="pill ${cls}">${esc(lb)}</span></td><td class="num">${lt}</td><td class="num">${sh}</td><td class="num">${tr}</td><td class="num">${c.n_base+c.n_recent}</td></tr>`}).join('')||'<tr><td colspan="6" class="empty">No channels suitable for a model.</td></tr>';
+  const judged=MODEL.channels.filter(c=>!['learning','quiet'].includes(c.status));
+  $('#modelNote').textContent=`Orbit ${MODEL.period_min.toFixed(1)} min`+(MODEL.shadow_min_now!=null?` · in shadow ${MODEL.shadow_min_now} min of it now`:'')+` · ${judged.length} of ${MODEL.channels.length} channels judged`;
+}
+function profileSVG(c,pr){
+  if(!pr||(!pr.base.length&&!pr.recent.length))return '<p class="note">No samples with a known orbit position yet.</p>';
+  const P=pr.period_min,all=pr.base.map(p=>p[1]).concat(pr.recent.map(p=>p[1]));pr.bins.forEach(b=>{if(b){all.push(b[2],b[3])}});
+  let lo=Math.min(...all),hi=Math.max(...all);if(hi-lo<1e-6){lo-=1;hi+=1}const pd=(hi-lo)*.08;lo-=pd;hi+=pd;
+  const W=740,H=230,L0=52,R0=10,T0=18,B0=28,X=m=>L0+m/P*(W-L0-R0),Y=v=>T0+(hi-v)/(hi-lo)*(H-T0-B0);let g='';
+  const sh=pr.shadow_min;if(sh){g+=`<rect x="${X(P-sh).toFixed(1)}" y="${T0}" width="${(X(P)-X(P-sh)).toFixed(1)}" height="${H-T0-B0}" fill="var(--stale)" fill-opacity=".16"/><text x="${X(P-sh/2).toFixed(1)}" y="${T0-5}" text-anchor="middle" font-size="10.5" fill="var(--muted)" font-family="IBM Plex Sans Condensed,sans-serif" letter-spacing=".06em">EARTH’S SHADOW</text><text x="${X((P-sh)/2).toFixed(1)}" y="${T0-5}" text-anchor="middle" font-size="10.5" fill="var(--muted)" font-family="IBM Plex Sans Condensed,sans-serif" letter-spacing=".06em">SUNLIGHT</text>`}
+  for(let i=0;i<=4;i++){const v=lo+(hi-lo)*i/4,y=Y(v);g+=`<line x1="${L0}" x2="${W-R0}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" stroke="var(--line)"/><text x="${L0-6}" y="${(y+3.5).toFixed(1)}" text-anchor="end" font-size="10.5" font-family="IBM Plex Mono,monospace" fill="var(--muted)">${v.toFixed(Math.min(c.dp,2))}</text>`}
+  for(let m=0;m<=P;m+=15){const x=X(m);g+=`<text x="${x.toFixed(1)}" y="${H-9}" text-anchor="middle" font-size="10.5" font-family="IBM Plex Mono,monospace" fill="var(--muted)">${m}</text>`}
+  for(const [m,v] of pr.base)g+=`<circle cx="${X(m).toFixed(1)}" cy="${Y(v).toFixed(1)}" r="1.7" fill="var(--muted)" fill-opacity=".35"/>`;
+  const bins=pr.bins.filter(Boolean);
+  if(bins.length>1){const up=bins.map(b=>X(b[0]).toFixed(1)+','+Y(b[3]).toFixed(1)),dn=bins.slice().reverse().map(b=>X(b[0]).toFixed(1)+','+Y(b[2]).toFixed(1));
+    g+=`<polygon points="${up.concat(dn).join(' ')}" fill="var(--accent)" fill-opacity=".12"/><polyline points="${bins.map(b=>X(b[0]).toFixed(1)+','+Y(b[1]).toFixed(1)).join(' ')}" fill="none" stroke="var(--accent)" stroke-width="2"/>`}
+  for(const [m,v,t] of pr.recent)g+=`<circle cx="${X(m).toFixed(1)}" cy="${Y(v).toFixed(1)}" r="3" fill="var(--warn)" stroke="var(--panel)" stroke-width="1"><title>${fmtDT(t)} · ${fv(c,v)} · ${m.toFixed(0)} min after sunrise</title></circle>`;
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(c.name)} against position in the orbit">${g}</svg>`;
+}
+async function loadProfile(id){
+  PROFILE=null;try{const pr=await api('/api/profile?ch='+encodeURIComponent(id));if(drawerCh===id){PROFILE=pr;renderProfile()}}catch(e){const b=$('#drProfile');if(b)b.innerHTML='<p class="note">Could not load the orbit profile.</p>'}
+}
+function renderProfile(){
+  const box=$('#drProfile');if(!box||!drawerCh)return;const c=CHM[drawerCh];if(!PROFILE){box.innerHTML='<p class="note">Loading…</p>';return}
+  box.innerHTML=profileSVG(c,PROFILE);
+  const m=MODEL&&MODEL.channels.find(x=>x.id===c.id);const u=c.unit?' '+c.unit:'';
+  $('#drModel').innerHTML=!m?'This channel is not modelled (counters and status flags are left out).':
+    m.status==='learning'?`Still learning: ${m.n_base} samples with a known orbit position so far, ${m.need} more needed before it is judged.`:
+    `${(M_ST[m.status]||['',m.status])[1]}. `+(m.shift!=null?`Over the last ${MODEL.recent_days} days it ran ${sgn(m.shift,Math.min(c.dp,2))}${u} (${sgn(m.z,1)}σ) from its learned normal. `:'')+
+    `Typical scatter around the curve is ±${m.sigma.toFixed(Math.min(c.dp,2)+1)}${u}`+(m.seasonal_per_min!=null?`; each extra minute of shadow per orbit moves it ${sgn(m.seasonal_per_min,3)}${u}`:'')+'.'+
+    (PROFILE.unphased?` ${PROFILE.unphased} older samples have no orbit position and are left out.`:'');
+}
+
+/* ---------- live feed (server-sent events) ---------- */
+let ES=null,streamOn=false,feedT=null;
+function feedPush(it){
+  const top=FEED[0];
+  if(it.kind==='frame'&&top&&top.kind==='frame'&&top.sat===it.sat&&top.observer===it.observer&&it.at-top.at<15000){
+    top.n++;top.ok+=it.ok;top.t0=Math.min(top.t0,it.t0);top.t1=Math.max(top.t1,it.t1);top.saa=top.saa||it.saa;top.at=it.at;top.fresh=true}
+  else{FEED.unshift(it);FEED.length=Math.min(FEED.length,40)}
+  clearTimeout(feedT);feedT=setTimeout(renderFeed,250);
+}
+function renderFeed(){
+  $('#feed').innerHTML=FEED.length?FEED.map(f=>{const cls=f.fresh?' class="new"':'';f.fresh=false;
+    if(f.kind==='frame')return `<li${cls}><span class="mono">${fmtT(f.at)}</span><span><b>${f.n} frame${f.n>1?'s':''}</b> of ${esc(f.sat)} from ${esc(f.observer||'a station')}${f.saa?'<span class="badge" title="Received while the satellite was over the South Atlantic Anomaly">SAA</span>':''}</span><span class="d">${f.ok} decoded · heard ${f.t0===f.t1?fmtHM(f.t0):fmtHM(f.t0)+'–'+fmtHM(f.t1)} (${ago(f.at-f.t1)} before it reached this Pi)</span></li>`;
+    if(f.kind==='fetch')return `<li${cls}><span class="mono">${fmtT(f.at)}</span><span>${f.ok?'':'<b>Fetch failed:</b> '}${esc(f.msg)}</span></li>`;
+    return `<li${cls}><span class="mono">${fmtT(f.at)}</span><span class="note">${esc(f.msg)}</span></li>`}).join(''):'<li><span></span><span class="note">Frames appear here the moment the Pi stores them.</span></li>';
+}
+function setLive(on,msg){streamOn=on;$('#liveDot').className='livedot'+(on?' on':'');$('#liveNote').textContent=msg}
+let afterFramesT=null;
+function connectStream(){
+  if(!window.EventSource){setLive(false,'Not supported in this browser');return}
+  ES=new EventSource('/api/stream');
+  ES.addEventListener('hello',()=>setLive(true,'Live · frames appear as the Pi stores them'));
+  ES.addEventListener('frame',e=>{const d=JSON.parse(e.data);
+    feedPush({kind:'frame',at:Date.now(),sat:d.sat,norad:d.norad,observer:d.observer,n:1,ok:d.ok?1:0,t0:d.t,t1:d.t,saa:d.saa,fresh:true});
+    if(d.norad===SAT){clearTimeout(afterFramesT);afterFramesT=setTimeout(async()=>{const n=FRAMES.length;await poll('tel');await Promise.all(['health','obs','model'].map(poll));refresh(true);
+      const k=FRAMES.length-n;if(k>0)toast(`${k} new frame${k>1?'s':''} of ${CONF.satellite.name} just arrived`);if(tab==='frames')loadFrames(false)},2500)}});
+  ES.addEventListener('fetch',e=>{const d=JSON.parse(e.data);feedPush({kind:'fetch',at:d.t,ok:d.ok,msg:d.message,fresh:true});poll('health')});
+  ES.addEventListener('fetching',()=>feedPush({kind:'info',at:Date.now(),msg:'The Pi is asking SatNOGS for new frames…',fresh:true}));
+  ES.onerror=()=>setLive(false,'Reconnecting…');
+}
+function seedFeed(){if(FEED.length||!HEALTH)return;for(const f of HEALTH.fetches.slice(0,6).reverse())FEED.unshift({kind:'fetch',at:f.t_ms,ok:!!f.ok,msg:f.message||''});renderFeed()}
+
+/* ---------- space weather ---------- */
+function renderSW(now){
+  const box=$('#sw');if(!SW){return}
+  if(!SW.kp.t&&!SW.xray.t){box.innerHTML='<div class="empty">Waiting for the first update from NOAA (every 3 hours, with the fetch).</div>';return}
+  const g=k=>k&&k.g?`<span class="pill ${+k.g.slice(1)>=3?'crit':'warn'}">${k.g} storm</span>`:'<span class="pill ok">Quiet</span>';
+  const kpS=SW.series.kp||[],W=360,H=64,ws=now-7*DAY,bw=Math.max(1.5,(W-4)/(7*8)-1);
+  let bars='';for(const [t,v] of kpS){if(t<ws)continue;const x=2+(t-ws)/(7*DAY)*(W-4),h=Math.max(1.5,v/9*(H-12));const col=v>=4.67?'var(--crit)':v>=3.67?'var(--warn)':'var(--ok)';bars+=`<rect x="${x.toFixed(1)}" y="${(H-2-h).toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" fill="${col}" fill-opacity=".8"><title>${fmtDT(t)} · Kp ${v.toFixed(2)}</title></rect>`}
+  const y5=H-2-5/9*(H-12);
+  box.innerHTML=`<div class="swgrid">
+    <div><span class="label">Kp now</span><span class="v">${SW.kp.value!=null?SW.kp.value.toFixed(1):'—'} ${g(SW.kp)}</span><span class="s">Geomagnetic activity, 0–9</span></div>
+    <div><span class="label">Kp peak, 24 h</span><span class="v">${SW.kp_peak_24h.value!=null?SW.kp_peak_24h.value.toFixed(1):'—'} ${SW.kp_peak_24h.g?g(SW.kp_peak_24h):''}</span><span class="s">${SW.kp_peak_24h.t?fmtDT(SW.kp_peak_24h.t):''}</span></div>
+    <div><span class="label">Solar X-rays now</span><span class="v">${esc(SW.xray.class||'—')}</span><span class="s">GOES, A·B·C·M·X scale</span></div>
+    <div><span class="label">Biggest flare, 24 h</span><span class="v">${esc(SW.xray_peak_24h.class||'—')}</span><span class="s">${SW.xray_peak_24h.t?fmtDT(SW.xray_peak_24h.t):''}</span></div>
+  </div><div class="pb" style="padding-top:6px"><svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block" role="img" aria-label="Kp index over 7 days"><line x1="0" x2="${W}" y1="${y5.toFixed(1)}" y2="${y5.toFixed(1)}" stroke="var(--crit)" stroke-dasharray="3 3" stroke-opacity=".5"/>${bars}</svg>
+  <p class="note">Kp, last 7 days; above the dashed line is a geomagnetic storm. Storms heat the upper atmosphere (more drag) and bring more energetic particles. Storm periods are also marked on each channel’s 7-day chart.${SW.f107.value!=null?` Solar flux ${SW.f107.value.toFixed(0)} sfu.`:''}</p></div>`;
+  $('#swNote').textContent='NOAA SWPC'+(SW.refreshed_ms?` · checked ${ago(now-SW.refreshed_ms)} ago`:'');
+}
+
+/* ---------- morning summary ---------- */
+function renderSummary(){
+  if(!SUM)return;$('#sumText').textContent=SUM.text||'Nothing to report yet.';
+  const h=pad(SUM.hour)+':00';
+  $('#sumNote').textContent=SUM.phone?(SUM.hour<0?'Daily push is off (summary_hour = -1).':`Pushed to your phone every day at ${h} (${SUM.timezone})${SUM.sent_day?', last sent '+SUM.sent_day:''}. Includes every tracked satellite.`)
+    :'Set ntfy_topic in config.toml to get this on your phone every morning.';
+  $('#sumSend').hidden=!SUM.phone;
+}
+
 /* ---------- main render ---------- */
 let AV_cache={open:[],shelved:[],closed:[]};
 function refresh(force){
   if(!CONF)return;const now=Date.now();D=derive(now);const AV=alertView(now);AV_cache=AV;
   $('#utc').textContent=fmtT(now);$('#date').textContent=fmtD(now);
-  renderStrip(now,AV);renderTlm(now);renderObs(now);renderAlerts(AV);renderProc(now);renderEquip(now);renderRecent(now);renderContext(now);soundCheck(AV);
+  renderStrip(now,AV);renderTlm(now);renderObs(now);renderAlerts(AV);renderProc(now);renderEquip(now);renderRecent(now);renderContext(now);soundCheck(AV);renderModel();if(force||tick%15===0)renderSW(now);
   if(force||tick%4===0)renderFrameChart(now);
   if(tab==='passes')renderPasses(now);
   if(drawerCh)renderDrawer(false);
@@ -855,6 +1001,9 @@ async function poll(kind){
     if(kind==='passes')PASSES=await api('/api/passes?hours=36');
     if(kind==='obs')OBS=await api('/api/observations?days=3');
     if(kind==='now')NOW=await api('/api/now');
+    if(kind==='model'){MODEL=await api('/api/model');lastModelSig='';renderModel()}
+    if(kind==='sw'){SW=await api('/api/spaceweather?days=7');renderSW(Date.now())}
+    if(kind==='sum'){SUM=await api('/api/summary');renderSummary()}
     if(kind==='ecl'){const n=Date.now();ECL=(await api(`/api/eclipses?since=${n-7*DAY}&until=${n}`)).eclipses||[]}
     if(kind==='notes'&&document.activeElement!==$('#hoNotes')){NOTES=await api('/api/notes');if($('#hoNotes').value!==NOTES.text)$('#hoNotes').value=NOTES.text}
     online=true;
@@ -869,6 +1018,9 @@ async function boot(){
   buildTlm();
   await Promise.all(['tel','log','health','passes','notes','obs','now','ecl'].map(poll));
   renderAbout();refresh(true);if(tab!=='console')showTab(tab);
+  seedFeed();connectStream();
+  Promise.all(['model','sw','sum'].map(poll)).then(()=>refresh(true));
+  setInterval(()=>poll('model'),300000);setInterval(()=>poll('sw'),900000);setInterval(()=>poll('sum'),600000);
   setInterval(()=>{tick++;refresh(false)},1000);
   setInterval(()=>poll('tel'),60000);setInterval(()=>{if(HEALTH&&(HEALTH.fetching||!FRAMES.length)){poll('tel');poll('health')}},10000);setInterval(()=>poll('log'),10000);setInterval(()=>poll('health'),20000);
   setInterval(()=>poll('passes'),600000);setInterval(()=>poll('notes'),15000);
@@ -885,6 +1037,8 @@ document.addEventListener('click',async e=>{
   if((el=T.closest('[data-goto]')))showTab(el.dataset.goto);
   if((el=T.closest('[data-chlink]'))){e.preventDefault();openDrawer(el.dataset.chlink);return}
   if((el=T.closest('tr[data-ch]'))){openDrawer(el.dataset.ch);return}
+  if((el=T.closest('tr[data-mch]'))){if(CHM[el.dataset.mch])openDrawer(el.dataset.mch);return}
+  if(T.closest('#sumSend')){try{const r=await api('/api/summary/send',{method:'POST',body:{}});toast(r.message);poll('sum')}catch(err){if(err.status===401){$('#passFld').hidden=false;toast('Enter the operator passcode first.')}else toast(err.body&&err.body.message?err.body.message:err.message)}return}
   if((el=T.closest('tr[data-frame]'))){const id=+el.dataset.frame;openFrame=openFrame===id?null:id;renderFrames();return}
   if((el=T.closest('[data-ack]'))){const a=D.alerts.find(x=>x.id===el.dataset.ack);if(a)act('ack',{alert:a.id,sev:a.sev},`Acknowledged ${a.event?'event':a.sev==='crit'?'ALARM':'CAUTION'}: ${a.msg}`)}
   if(T.closest('#ackAll')){for(const a of alertView(Date.now()).open.filter(a=>!a.ack))if(!await act('ack',{alert:a.id,sev:a.sev},`Acknowledged ${a.event?'event':a.sev==='crit'?'ALARM':'CAUTION'}: ${a.msg}`))break}

@@ -44,3 +44,11 @@ min_obs_elevation = 15              # ignore very low passes when judging silenc
 ntfy_topic = ""
 ntfy_server = "https://ntfy.sh"
 console_url = ""                    # optional: link opened when you tap an alert, e.g. http://groundpi.local:8080
+summary_hour = 7                    # morning summary at this local hour (-1 to turn it off)
+timezone = ""                       # e.g. "Asia/Ho_Chi_Minh"; blank uses the Pi's own time zone (often UTC)
+
+[spaceweather]
+# Geomagnetic storms, solar flares and solar flux from NOAA's Space Weather Prediction Center.
+# Public data, no key needed, fetched every 3 hours.
+enabled = true
+api = "https://services.swpc.noaa.gov"

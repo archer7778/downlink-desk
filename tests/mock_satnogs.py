@@ -178,6 +178,19 @@ def serve(port, token="test-token", page_size=25, require_token=True):
                 page = src[start:start + page_size]
                 nxt = f"{base}/api/telemetry/?cursor={start + page_size}&sat={sat}" if start + page_size < len(src) else None
                 return self._json({"next": nxt, "previous": None, "results": page})
+            # NOAA SWPC look-alikes (same shapes as the real products, October 2026)
+            if u.path == "/products/noaa-planetary-k-index.json":
+                now = int(time.time()) // 10800 * 10800
+                return self._json([{"time_tag": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(now - i * 10800)),
+                                    "Kp": 7.0 if i == 3 else 2.33, "a_running": 9, "station_count": 8} for i in range(24, -1, -1)])
+            if u.path == "/json/f107_cm_flux.json":
+                return self._json([{"time_tag": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(time.time() - 7200)),
+                                    "frequency": 2800, "flux": 120.0}])
+            if u.path == "/json/goes/primary/xrays-6-hour.json":
+                t0 = int(time.time()) // 60 * 60
+                return self._json([{"time_tag": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t0 - i * 60)), "satellite": 18,
+                                    "flux": 2.4e-5 if i == 30 else 1.5e-6, "energy": e}
+                                   for i in range(120) for e in ("0.05-0.4nm", "0.1-0.8nm")])
             self._json({"detail": "not found"}, 404)
 
     httpd = ThreadingHTTPServer(("127.0.0.1", port), H)

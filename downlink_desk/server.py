@@ -15,12 +15,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import __version__, logchain
+from . import __version__, baseline, logchain, spacewx, summary
 from . import db as dbm
 from .analysis import observation_report, silent_streak
 from .catalog import channels_for, entries, featured, find
 from .config import find_config
 from .fetch import spec_for
+from .orbit import in_saa
 
 WEB = Path(__file__).resolve().parent.parent / "web"
 STARTED = dbm.now_ms()
@@ -34,7 +35,10 @@ class App:
         self._pass_cache = {}
         self._ecl_cache = {}
         self._spec_cache = {}
+        self._model_cache = {}
         self._fetching = False
+        self._streams = 0
+        self.max_streams = 12
         if not self.conn.execute("SELECT 1 FROM log LIMIT 1").fetchone():
             s = cfg["satellite"]
             logchain.append(self.conn, "system", {"norad": s["norad"]},
@@ -157,12 +161,14 @@ class App:
     def frames(self, sat, limit, before):
         with self.lock:
             rows = self.conn.execute(
-                "SELECT id,ts_ms,observer,station_id,app_source,frame_type,decoded_ok,fields_json,frame_hex,sunlit,sub_lat,sub_lon FROM frames"
+                "SELECT id,ts_ms,observer,station_id,app_source,frame_type,decoded_ok,fields_json,frame_hex,sunlit,sub_lat,sub_lon,phase_min,shadow_min FROM frames"
                 " WHERE norad=? AND ts_ms<? ORDER BY ts_ms DESC LIMIT ?", (sat["norad"], before, limit)).fetchall()
         return [{"id": r["id"], "t": r["ts_ms"], "observer": r["observer"], "station_id": r["station_id"],
                  "app_source": r["app_source"], "type": r["frame_type"], "ok": bool(r["decoded_ok"]),
                  "fields": json.loads(r["fields_json"] or "{}"), "hex": r["frame_hex"],
-                 "sunlit": r["sunlit"], "sub_lat": r["sub_lat"], "sub_lon": r["sub_lon"]} for r in rows]
+                 "sunlit": r["sunlit"], "sub_lat": r["sub_lat"], "sub_lon": r["sub_lon"],
+                 "phase": r["phase_min"] if (r["phase_min"] or 0) >= 0 else None, "shadow": r["shadow_min"],
+                 "saa": in_saa(r["sub_lat"], r["sub_lon"])} for r in rows]
 
     def observations(self, sat, days):
         now = dbm.now_ms()
@@ -242,6 +248,49 @@ class App:
         self._pass_cache[sat["norad"]] = (time.time(), out)
         return out
 
+    def model(self, sat):
+        n = sat["norad"]
+        with self.lock:
+            sig = self.conn.execute("SELECT COUNT(*), MAX(ts_ms), (SELECT COUNT(*) FROM frames WHERE norad=? AND phase_min IS NULL) "
+                                    "FROM points WHERE norad=?", (n, n)).fetchone()
+        key = (n, tuple(sig), dbm.now_ms() // 600_000)
+        hit = self._model_cache.get(n)
+        if hit and hit[0] == key:
+            return hit[1]
+        spec = self.spec(sat)
+        with self.lock:
+            m = baseline.compute(self.conn, spec, n)
+        self._model_cache[n] = (key, m)
+        return m
+
+    def profile(self, sat, ch):
+        with self.lock:
+            return baseline.profile(self.conn, self.spec(sat), sat["norad"], ch)
+
+    def spaceweather(self, days):
+        now = dbm.now_ms()
+        with self.lock:
+            return spacewx.view(self.conn, now - days * 86_400_000, now)
+
+    def summary(self):
+        with self.lock:
+            s = summary.build(self.conn, self.cfg)
+            s["sent_day"] = dbm.meta_get(self.conn, "summary_sent")
+        s["phone"] = bool(str(self.cfg["notify"].get("ntfy_topic") or "").strip())
+        s["timezone"] = str(self.cfg["notify"].get("timezone") or "") or "the Pi's local time"
+        return s
+
+    def stream_open(self):
+        with self.lock:
+            if self._streams >= self.max_streams:
+                return False
+            self._streams += 1
+            return True
+
+    def stream_close(self):
+        with self.lock:
+            self._streams -= 1
+
     def fetch_now(self, sat=None):
         if self._fetching:
             return False, "A fetch is already running."
@@ -306,10 +355,14 @@ def make_handler(app):
             try:
                 if p == "/api/satellites":
                     return self._json(app.fleet())
+                if p == "/api/spaceweather":
+                    return self._json(app.spaceweather(min(float(q.get("days", 7)), 60)))
+                if p == "/api/summary":
+                    return self._json(app.summary())
                 if p == "/api/catalog":
                     with app.lock:
                         return self._json(entries(app.conn, app.cfg))
-                if p.startswith("/api/") and p not in ("/api/log", "/api/log/verify", "/api/notes", "/api/export/log.json"):
+                if p.startswith("/api/") and p not in ("/api/log", "/api/log/verify", "/api/notes", "/api/export/log.json", "/api/stream"):
                     sat = app.sat(q)
                 if p == "/api/config":
                     return self._json(app.config(sat))
@@ -329,6 +382,12 @@ def make_handler(app):
                     return self._json(app.eclipses(sat, since, min(int(q.get("until", now)), now + 86_400_000)))
                 if p == "/api/now":
                     return self._json(app.now_state(sat))
+                if p == "/api/model":
+                    return self._json(app.model(sat))
+                if p == "/api/profile":
+                    return self._json(app.profile(sat, q.get("ch", "")))
+                if p == "/api/stream":
+                    return self._stream()
                 if p == "/api/log":
                     with app.lock:
                         return self._json(logchain.entries(app.conn, int(q.get("after", 0))))
@@ -368,6 +427,11 @@ def make_handler(app):
                         dbm.meta_set(app.conn, "notes", {"text": text, "cs": str(body.get("cs", ""))[:16],
                                                          "t": dbm.now_ms()})
                     return self._json({"ok": True})
+                if p == "/api/summary/send":
+                    with app.lock:
+                        sent = summary.maybe_send(app.conn, app.cfg, log=lambda m: None, force=True)
+                    return self._json({"ok": sent, "message": "Sent to your phone." if sent else
+                                       "Not sent. Set ntfy_topic in config.toml to get it on your phone."}, 200 if sent else 409)
                 if p == "/api/fetch":
                     ok, msg = app.fetch_now(app.sat(q) if q.get("sat") else None)
                     return self._json({"ok": ok, "message": msg}, 202 if ok else 429)
@@ -379,6 +443,61 @@ def make_handler(app):
                 return self._json({"error": "not found"}, 404)
             except ValueError as e:
                 return self._json({"error": str(e)}, 400)
+
+        def _event(self, name, data):
+            self.wfile.write(f"event: {name}\ndata: {json.dumps(data, separators=(',', ':'))}\n\n".encode())
+
+        def _stream(self):
+            """Server-sent events: frames the moment the Pi stores them, and fetch progress.
+            The fetch job is a separate process, so this watches the database (cheap: two
+            indexed lookups every 2 s per open console)."""
+            if not app.stream_open():
+                return self._json({"error": "Too many consoles are streaming at once."}, 503)
+            try:
+                with app.lock:
+                    last_f = app.conn.execute("SELECT COALESCE(MAX(id),0) FROM frames").fetchone()[0]
+                    last_x = app.conn.execute("SELECT COALESCE(MAX(id),0) FROM fetches").fetchone()[0]
+                    attempt = dbm.meta_get(app.conn, "last_attempt_ms", 0)
+                    names = {s["norad"]: s["name"] for s in dbm.satellites(app.conn, False)}
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Accel-Buffering", "no")
+                self.end_headers()
+                self._event("hello", {"now": dbm.now_ms(), "version": __version__})
+                end, beat = time.time() + 1800, time.time()
+                fetching = app._fetching
+                while time.time() < end:
+                    time.sleep(2)
+                    with app.lock:
+                        frs = app.conn.execute(
+                            "SELECT id,ts_ms,observer,frame_type,decoded_ok,sunlit,sub_lat,sub_lon,norad,fetched_ms FROM frames "
+                            "WHERE id>? ORDER BY id LIMIT 300", (last_f,)).fetchall()
+                        fxs = app.conn.execute("SELECT * FROM fetches WHERE id>? ORDER BY id", (last_x,)).fetchall()
+                        att = dbm.meta_get(app.conn, "last_attempt_ms", 0)
+                    for r in frs:
+                        last_f = r["id"]
+                        if r["norad"] not in names:
+                            names[r["norad"]] = str(r["norad"])
+                        self._event("frame", {"id": r["id"], "norad": r["norad"], "sat": names.get(r["norad"]),
+                                              "t": r["ts_ms"], "stored": r["fetched_ms"], "observer": r["observer"],
+                                              "type": r["frame_type"], "ok": bool(r["decoded_ok"]), "sunlit": r["sunlit"],
+                                              "lat": r["sub_lat"], "lon": r["sub_lon"], "saa": in_saa(r["sub_lat"], r["sub_lon"])})
+                    for r in fxs:
+                        last_x = r["id"]
+                        self._event("fetch", {"t": r["t_ms"], "ok": bool(r["ok"]), "message": r["message"],
+                                              "new": r["frames_new"], "norad": r["norad"]})
+                    if att != attempt or app._fetching != fetching:
+                        if (att != attempt) or app._fetching:
+                            self._event("fetching", {"t": att})
+                        attempt, fetching = att, app._fetching
+                    if time.time() - beat > 15:
+                        self.wfile.write(b": ping\n\n")
+                        beat = time.time()
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                pass
+            finally:
+                app.stream_close()
 
         def _static(self, p):
             if p == "/":
