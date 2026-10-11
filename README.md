@@ -44,7 +44,7 @@ Downlink Desk watches real CubeSats in orbit. It pulls their telemetry from the 
 
 > ⚠️ **Not flight software.** Downlink Desk is not affiliated with any satellite team, cannot command a spacecraft, and ships with provisional limits chosen for this console rather than the mission's own. Don't use it to make decisions about real hardware.
 
-**Try the training simulator in your browser:** <https://archer7778.github.io/downlink-desk/>. It's a self-contained practice version with simulated faults, no Pi needed.
+**See it running on real data, no install:** <https://archer7778.github.io/downlink-desk/>. GitHub rebuilds this live demo every 6 hours with the same code a Pi runs, from real GRBBeta telemetry. To practise with simulated faults instead, try the [training simulator](https://archer7778.github.io/downlink-desk/training).
 
 ## How it works
 
@@ -63,6 +63,7 @@ NOAA space weather (every 3 h) ────────────────�
 - Alerts are worked out in the browser from the stored telemetry, so every viewer sees the same thing. Phone alerts are checked by the fetch job on the Pi.
 - `downlink_desk/baseline.py` is the learned model: robust medians in 5-minute bins of orbit phase, a seasonal correction for shadow length, and drift judged on effect size and significance together, so a single noisy pass can't trigger it.
 - `downlink_desk/battery.py` places every frame in the orbit's day/night cycle and integrates charge and discharge current around it; internal resistance comes from how voltage moves with current once the orbit pattern is removed.
+- `.github/workflows/demo.yml` builds the public demo: GitHub Actions fetches from SatNOGS every 6 hours, keeps the database in its cache between runs, and `downlink_desk/export_static.py` publishes a read-only snapshot of the console to GitHub Pages.
 - `deploy/update.sh` (run by a systemd timer after boot and nightly) fast-forwards from GitHub, installs new packages, restarts the console, checks it answers, and rolls back if not.
 - `downlink_desk/spacewx.py` reads NOAA SWPC's public JSON products; `downlink_desk/summary.py` builds the morning summary (`python -m downlink_desk.fetch --summary` prints it).
 

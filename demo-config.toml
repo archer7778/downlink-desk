@@ -1,0 +1,13 @@
+# Configuration for the public live demo, built by GitHub Actions (.github/workflows/demo.yml).
+# Everything not set here uses the defaults: GRBBeta, polite SatNOGS polling, NOAA space weather.
+
+[station]
+name = "Da Nang"          # city centre, used for "next pass over you" on the demo
+lat = 16.05
+lon = 108.21
+
+[storage]
+db = "demo/data/downlink-desk.db"
+
+[satnogs]
+token_file = "demo/no-token-file"   # the API key comes from the SATNOGS_TOKEN repository secret
