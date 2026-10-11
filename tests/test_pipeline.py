@@ -280,6 +280,23 @@ def test_model_spaceweather_summary_stream():
         print("streamed:", ev, f"after {time.time() - t0:.1f}s")
         assert ev["observer"] == "Test-Station" and ev["saa"] is True
         r.close()
+        # incremental telemetry: only frames stored after the given id
+        j = json.loads(urllib.request.urlopen("http://127.0.0.1:8771/api/telemetry?after_id=999998", timeout=15).read())
+        assert [f[0] for f in j["frames"]] == [999999] and j["max_id"] >= 999999
+        j = json.loads(urllib.request.urlopen("http://127.0.0.1:8771/api/telemetry?after_id=999999", timeout=15).read())
+        assert j["frames"] == [] and j["channels"] == {}
+        full = json.loads(urllib.request.urlopen(f"http://127.0.0.1:8771/api/telemetry?since={now - 30 * 86_400_000}", timeout=30).read())
+        assert sum(len(v) for v in full["channels"].values()) == conn.execute(
+            "SELECT COUNT(*) FROM points WHERE norad=60237 AND ts_ms>?", (now - 30 * 86_400_000,)).fetchone()[0]   # nothing cut off
+        # compressed when the browser asks, and the page itself revalidates with a 304
+        r2 = urllib.request.urlopen(urllib.request.Request("http://127.0.0.1:8771/api/model", headers={"Accept-Encoding": "gzip"}))
+        assert r2.headers.get("Content-Encoding") == "gzip"
+        r3 = urllib.request.urlopen("http://127.0.0.1:8771/")
+        try:
+            urllib.request.urlopen(urllib.request.Request("http://127.0.0.1:8771/", headers={"If-None-Match": r3.headers["ETag"]}))
+            raise AssertionError("expected 304")
+        except urllib.error.HTTPError as e:
+            assert e.code == 304
         for path in ("/api/model", "/api/profile?ch=bat_t", "/api/spaceweather", "/api/summary"):
             j = json.loads(urllib.request.urlopen("http://127.0.0.1:8771" + path, timeout=30).read())
             assert "error" not in j, (path, j)
