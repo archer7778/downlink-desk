@@ -90,6 +90,7 @@ def connect(path):
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA journal_size_limit=4194304")   # keep the -wal file small on the SD card
     conn.executescript(SCHEMA)
     cols = {r[1] for r in conn.execute("PRAGMA table_info(frames)")}
     for col, typ in (("sunlit", "INTEGER"), ("sub_lat", "REAL"), ("sub_lon", "REAL"),
@@ -116,6 +117,8 @@ def migrate(conn, cfg):
     conn.execute("CREATE INDEX IF NOT EXISTS frames_sat_ts ON frames (norad, ts_ms)")
     conn.execute("CREATE INDEX IF NOT EXISTS points_sat_ts ON points (norad, ts_ms)")
     conn.execute("CREATE INDEX IF NOT EXISTS obs_sat_end ON observations (norad, end_ms)")
+    # tiny index over frames still waiting for an orbit position (usually none)
+    conn.execute("CREATE INDEX IF NOT EXISTS frames_nophase ON frames (norad) WHERE phase_min IS NULL")
     if not conn.execute("SELECT 1 FROM satellites LIMIT 1").fetchone():
         conn.execute("INSERT INTO satellites(norad,name,decoder,channels,enabled,added_ms) VALUES(?,?,?,?,1,?)",
                      (norad, s["name"], s["decoder"], s.get("channels", ""), now_ms()))
@@ -161,6 +164,14 @@ def record_fetch(conn, ok, status, seen, new, message, norad=None):
                  (now_ms(), 1 if ok else 0, status, seen, new, message[:500], norad))
     conn.execute("DELETE FROM fetches WHERE id NOT IN (SELECT id FROM fetches ORDER BY id DESC LIMIT 500)")
     conn.commit()
+
+
+def connect_ro(path):
+    """A light read-only connection for the web server (no schema work, no writes)."""
+    conn = sqlite3.connect(str(path), timeout=30, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA query_only=ON")
+    return conn
 
 
 def open_db(cfg):

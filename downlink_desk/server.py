@@ -4,11 +4,15 @@ Standard library only, so it runs comfortably on a Raspberry Pi Zero 2 W.
     python -m downlink_desk.server [--config config.toml]
 """
 import argparse
+import contextlib
 import csv
+import gzip
+import hashlib
 import hmac
 import io
 import json
 import mimetypes
+import queue
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -25,6 +29,7 @@ from .orbit import in_saa
 
 WEB = Path(__file__).resolve().parent.parent / "web"
 STARTED = dbm.now_ms()
+STATIC = {}
 
 
 class App:
@@ -36,18 +41,66 @@ class App:
         self._ecl_cache = {}
         self._spec_cache = {}
         self._model_cache = {}
+        self._cache = {}
+        self._pool = queue.LifoQueue()
         self._fetching = False
         self._streams = 0
         self.max_streams = 12
+        self._cond = threading.Condition()
+        self._events, self._ev_total = [], 0
+        self._watcher = None
         if not self.conn.execute("SELECT 1 FROM log LIMIT 1").fetchone():
             s = cfg["satellite"]
             logchain.append(self.conn, "system", {"norad": s["norad"]},
                             f"Console commissioned for {s['name']} (NORAD {s['norad']}).", "system")
 
+    # ---------- plumbing ----------
+    @contextlib.contextmanager
+    def ro(self):
+        """A read-only connection from a small pool. SQLite's WAL mode lets these read while the
+        fetch job writes, so a slow read (the health model, the summary) never blocks the rest."""
+        try:
+            c = self._pool.get_nowait()
+        except queue.Empty:
+            c = dbm.connect_ro(self.cfg.db_path)
+        try:
+            yield c
+        finally:
+            if self._pool.qsize() < 6:
+                self._pool.put(c)
+            else:
+                c.close()
+
+    def cached(self, key, ttl, fn, sig=None):
+        """Small time-and-signature cache for results that are costly to rebuild."""
+        hit = self._cache.get(key)
+        now = time.time()
+        if hit and now - hit[0] < ttl and hit[1] == sig:
+            return hit[2]
+        val = fn()
+        self._cache[key] = (now, sig, val)
+        return val
+
+    def data_sig(self, norad=None):
+        """Changes whenever a frame is stored (cheap: two index lookups)."""
+        with self.ro() as c:
+            if norad is None:
+                return (c.execute("SELECT MAX(id) FROM frames").fetchone()[0],)
+            return (c.execute("SELECT MAX(id) FROM frames").fetchone()[0],
+                    c.execute("SELECT COUNT(*) FROM frames WHERE norad=? AND phase_min IS NULL", (norad,)).fetchone()[0])
+
+    def _storage(self):
+        with self.ro() as c:
+            return dbm.storage(c, self.cfg.db_path)
+
+    def _commissioned(self):
+        with self.ro() as c:
+            return c.execute("SELECT MIN(t_ms) m FROM log").fetchone()["m"]
+
     # ---------- satellites ----------
     def sats(self, enabled_only=True):
-        with self.lock:
-            return dbm.satellites(self.conn, enabled_only)
+        with self.ro() as c:
+            return dbm.satellites(c, enabled_only)
 
     def sat(self, q):
         """The satellite a request is about: ?sat=NORAD, else the first one tracked."""
@@ -69,8 +122,8 @@ class App:
             return hit[1]
         spec = spec_for(self.cfg, sat)
         if not spec.get("channels"):
-            with self.lock:
-                rows = self.conn.execute("SELECT channel, COUNT(*) n, MAX(ABS(value - CAST(value AS INTEGER))) frac "
+            with self.ro() as c:
+                rows = c.execute("SELECT channel, COUNT(*) n, MAX(ABS(value - CAST(value AS INTEGER))) frac "
                                          "FROM points WHERE norad=? GROUP BY channel ORDER BY channel", (key,)).fetchall()
             chans = []
             for r in rows:
@@ -93,15 +146,15 @@ class App:
         feat = {f["norad"]: f for f in featured()}
         for s in self.sats(False):
             n = s["norad"]
-            with self.lock:
-                c = self.conn.execute("SELECT MAX(ts_ms) last, SUM(CASE WHEN ts_ms>? THEN 1 ELSE 0 END) day "
-                                      "FROM frames WHERE norad=? AND decoded_ok=1", (now - 86_400_000, n)).fetchone()
-                rep = observation_report(self.conn, self.cfg, now - 3 * 86_400_000, now, n)
-                last_ok = dbm.smeta_get(self.conn, n, "last_ok_ms")
+            with self.ro() as c:
+                cnt = c.execute("SELECT MAX(ts_ms) last, SUM(CASE WHEN ts_ms>? THEN 1 ELSE 0 END) day "
+                                "FROM frames WHERE norad=? AND decoded_ok=1", (now - 86_400_000, n)).fetchone()
+                rep = observation_report(c, self.cfg, now - 3 * 86_400_000, now, n)
+                last_ok = dbm.smeta_get(c, n, "last_ok_ms")
             streak = silent_streak(rep, self.cfg)
             nxt = next((o for o in sorted(rep, key=lambda o: o["start"]) if o["end"] > now), None)
             f = feat.get(n, {})
-            out.append({**s, "last_frame_ms": c["last"], "frames_24h": c["day"] or 0, "last_ok_ms": last_ok,
+            out.append({**s, "last_frame_ms": cnt["last"], "frames_24h": cnt["day"] or 0, "last_ok_ms": last_ok,
                         "silent": len(streak) >= self.cfg["alerts"]["silent_after"],
                         "next_obs_ms": nxt["start"] if nxt else None,
                         "bio": f.get("bio", ""), "size": f.get("size", ""), "builder": f.get("builder", ""),
@@ -146,21 +199,41 @@ class App:
                 "alerts": c["alerts"], "phone_alerts": bool(str(c["notify"].get("ntfy_topic") or "").strip()),
                 "write_protected": bool(c["server"]["write_passcode"]), "spec": self.spec(sat),
                 "default_norad": int(c["satellite"]["norad"]),
-                "commissioned_ms": self.conn.execute("SELECT MIN(t_ms) m FROM log").fetchone()["m"]}
+                "commissioned_ms": self._commissioned()}
 
-    def telemetry(self, sat, since):
+    def telemetry(self, sat, since=None, after_id=None):
+        """Points grouped by channel, plus frame summaries.
+        since: everything heard after a time (first load).
+        after_id: only frames stored since the console last asked, whenever they were heard,
+        so late uploads and filled-in history arrive too, and an idle poll costs almost nothing."""
         n = sat["norad"]
-        with self.lock:
-            pts = self.conn.execute("SELECT ts_ms,channel,value FROM points WHERE norad=? AND ts_ms>? ORDER BY ts_ms LIMIT 60000",
-                                    (n, since)).fetchall()
-            frs = self.conn.execute("SELECT id,ts_ms,observer,frame_type,decoded_ok,sunlit FROM frames WHERE norad=? AND ts_ms>? "
-                                    "ORDER BY ts_ms LIMIT 20000", (n, since)).fetchall()
-        return {"now": dbm.now_ms(), "points": [[r[0], r[1], r[2]] for r in pts],
-                "frames": [[r[0], r[1], r[2], r[3], r[4], r[5]] for r in frs]}
+        with self.ro() as c:
+            max_id = c.execute("SELECT COALESCE(MAX(id),0) FROM frames").fetchone()[0]
+            if after_id is not None:
+                frs = c.execute("SELECT id,ts_ms,observer,frame_type,decoded_ok,sunlit FROM frames WHERE norad=? AND id>? "
+                                "ORDER BY id LIMIT 5000", (n, after_id)).fetchall()
+                if frs:
+                    max_id = frs[-1][0] if len(frs) == 5000 else max_id
+                    t0, t1 = min(r[1] for r in frs), max(r[1] for r in frs)
+                    lo = min(r[0] for r in frs)
+                    pts = c.execute("SELECT ts_ms,channel,value FROM points WHERE norad=? AND ts_ms BETWEEN ? AND ? "
+                                    "AND frame_id>=? AND frame_id<=?", (n, t0, t1, lo, frs[-1][0])).fetchall()
+                else:
+                    pts = []
+            else:
+                pts = c.execute("SELECT ts_ms,channel,value FROM points WHERE norad=? AND ts_ms>? ORDER BY ts_ms",
+                                (n, since)).fetchall()
+                frs = c.execute("SELECT id,ts_ms,observer,frame_type,decoded_ok,sunlit FROM frames WHERE norad=? AND ts_ms>? "
+                                "ORDER BY ts_ms", (n, since)).fetchall()
+        chans = {}
+        for t, ch, v in pts:
+            chans.setdefault(ch, []).append([t, round(v, 4)])
+        return {"now": dbm.now_ms(), "max_id": max_id, "more": len(frs) == 5000, "channels": chans,
+                "frames": [list(r) for r in frs]}
 
     def frames(self, sat, limit, before):
-        with self.lock:
-            rows = self.conn.execute(
+        with self.ro() as c:
+            rows = c.execute(
                 "SELECT id,ts_ms,observer,station_id,app_source,frame_type,decoded_ok,fields_json,frame_hex,sunlit,sub_lat,sub_lon,phase_min,shadow_min FROM frames"
                 " WHERE norad=? AND ts_ms<? ORDER BY ts_ms DESC LIMIT ?", (sat["norad"], before, limit)).fetchall()
         return [{"id": r["id"], "t": r["ts_ms"], "observer": r["observer"], "station_id": r["station_id"],
@@ -172,16 +245,16 @@ class App:
 
     def observations(self, sat, days):
         now = dbm.now_ms()
-        with self.lock:
-            rep = observation_report(self.conn, self.cfg, now - days * 86_400_000, now, sat["norad"])
-            refreshed = dbm.smeta_get(self.conn, sat["norad"], "obs_refreshed_ms")
+        with self.ro() as c:
+            rep = observation_report(c, self.cfg, now - days * 86_400_000, now, sat["norad"])
+            refreshed = dbm.smeta_get(c, sat["norad"], "obs_refreshed_ms")
         streak = silent_streak(rep, self.cfg)
         return {"now": now, "observations": rep, "refreshed_ms": refreshed,
                 "silent_streak": [o["id"] for o in streak], "silent_after": self.cfg["alerts"]["silent_after"]}
 
     def _tle(self, sat):
-        with self.lock:
-            return dbm.smeta_get(self.conn, sat["norad"], "tle")
+        with self.ro() as c:
+            return dbm.smeta_get(c, sat["norad"], "tle")
 
     def eclipses(self, sat, since, until):
         key = (sat["norad"], since // 1800_000, until // 1800_000)
@@ -201,29 +274,30 @@ class App:
         if not tle:
             return {}
         from .orbit import now_state
-        return now_state(tle["tle1"], tle["tle2"], dbm.now_ms()) or {}
+        return self.cached(("now", sat["norad"]), 15, lambda: now_state(tle["tle1"], tle["tle2"], dbm.now_ms()) or {},
+                           tle.get("tle1"))
 
     def health(self, sat):
         n = sat["norad"]
-        with self.lock:
-            g = lambda k, d=None: dbm.meta_get(self.conn, k, d)
-            fetches = [dict(r) for r in self.conn.execute("SELECT * FROM fetches WHERE norad=? OR norad IS NULL "
+        with self.ro() as c:
+            auth_error = bool(dbm.meta_get(c, "auth_error", False))
+            fetches = [dict(r) for r in c.execute("SELECT * FROM fetches WHERE norad=? OR norad IS NULL "
                                                          "ORDER BY id DESC LIMIT 60", (n,))]
-            counts = self.conn.execute("SELECT COUNT(*) n, MAX(ts_ms) last, SUM(decoded_ok) ok FROM frames WHERE norad=?",
-                                       (n,)).fetchone()
-            tle = dbm.smeta_get(self.conn, n, "tle") or {}
-            satmeta = dbm.smeta_get(self.conn, n, "satellite") or {}
-            last_attempt = dbm.smeta_get(self.conn, n, "last_attempt_ms")
-            last_ok = dbm.smeta_get(self.conn, n, "last_ok_ms")
-        with self.lock:
-            store = dbm.storage(self.conn, self.cfg.db_path)
+            counts = self.cached(("counts", n), 300, lambda: dict(c.execute(
+                "SELECT COUNT(*) n, MAX(ts_ms) last, SUM(decoded_ok) ok FROM frames WHERE norad=?", (n,)).fetchone()),
+                self.data_sig())
+            tle = dbm.smeta_get(c, n, "tle") or {}
+            satmeta = dbm.smeta_get(c, n, "satellite") or {}
+            last_attempt = dbm.smeta_get(c, n, "last_attempt_ms")
+            last_ok = dbm.smeta_get(c, n, "last_ok_ms")
+        store = self.cached("storage", 60, lambda: self._storage())
         size = store.get("db_bytes", 0)
         try:
             upd = json.loads((self.cfg.db_path.parent / "update.json").read_text())
         except (OSError, ValueError):
             upd = None
         return {"now": dbm.now_ms(), "server_started_ms": STARTED, "last_attempt_ms": last_attempt,
-                "last_ok_ms": last_ok, "auth_error": bool(g("auth_error", False)),
+                "last_ok_ms": last_ok, "auth_error": auth_error,
                 "token_present": bool(self.cfg.token), "fetches": fetches,
                 "frames_total": counts["n"], "frames_decoded": counts["ok"] or 0, "last_frame_ms": counts["last"],
                 "db_bytes": size, "tle_epoch_ms": tle.get("epoch_ms"), "satellite": satmeta,
@@ -252,59 +326,137 @@ class App:
 
     def model(self, sat):
         n = sat["norad"]
-        with self.lock:
-            sig = self.conn.execute("SELECT COUNT(*), MAX(ts_ms), (SELECT COUNT(*) FROM frames WHERE norad=? AND phase_min IS NULL) "
-                                    "FROM points WHERE norad=?", (n, n)).fetchone()
-        key = (n, tuple(sig), dbm.now_ms() // 600_000)
-        hit = self._model_cache.get(n)
-        if hit and hit[0] == key:
-            return hit[1]
         spec = self.spec(sat)
-        with self.lock:
-            m = baseline.compute(self.conn, spec, n)
-        self._model_cache[n] = (key, m)
-        return m
+
+        def build():
+            with self.ro() as c:
+                return baseline.compute(c, spec, n)
+        return self.cached(("model", n), 600, build, self.data_sig(n))
 
     def battery(self, sat):
-        launched = next((f.get("launched") for f in featured() if f["norad"] == sat["norad"]), None)
+        n = sat["norad"]
+        launched = next((f.get("launched") for f in featured() if f["norad"] == n), None)
         spec = self.spec(sat)
-        with self.lock:
-            return battery.analyse(self.conn, spec, sat["norad"], launched)
+
+        def build():
+            with self.ro() as c:
+                return battery.analyse(c, spec, n, launched)
+        return self.cached(("battery", n), 600, build, self.data_sig(n))
 
     def profile(self, sat, ch):
-        with self.lock:
-            return baseline.profile(self.conn, self.spec(sat), sat["norad"], ch)
+        with self.ro() as c:
+            return baseline.profile(c, self.spec(sat), sat["norad"], ch)
 
     def spaceweather(self, days):
         now = dbm.now_ms()
-        with self.lock:
-            return spacewx.view(self.conn, now - days * 86_400_000, now)
+        with self.ro() as c:
+            return spacewx.view(c, now - days * 86_400_000, now)
 
     def summary(self):
-        with self.lock:
-            s = summary.build(self.conn, self.cfg)
-            s["sent_day"] = dbm.meta_get(self.conn, "summary_sent")
+        def build():
+            with self.ro() as c:
+                out = summary.build(c, self.cfg)
+                out["sent_day"] = dbm.meta_get(c, "summary_sent")
+            return out
+        s = dict(self.cached("summary", 900, build, self.data_sig()))
         s["phone"] = bool(str(self.cfg["notify"].get("ntfy_topic") or "").strip())
         s["timezone"] = str(self.cfg["notify"].get("timezone") or "") or "the Pi's local time"
         return s
 
+    # ---------- live stream: one watcher thread shared by every open console ----------
     def stream_open(self):
         with self.lock:
             if self._streams >= self.max_streams:
                 return False
             self._streams += 1
+            if self._watcher is None:   # bookmark the database now, so nothing stored from here on is missed
+                with self.ro() as c:
+                    start = self._heads(c)
+                self._watcher = threading.Thread(target=self._watch, args=(start,), daemon=True)
+                self._watcher.start()
             return True
 
     def stream_close(self):
         with self.lock:
             self._streams -= 1
 
+    def _publish(self, evs):
+        with self._cond:
+            self._events.extend(evs)
+            self._ev_total += len(evs)
+            if len(self._events) > 2000:
+                del self._events[:len(self._events) - 2000]
+            self._cond.notify_all()
+
+    def events_since(self, idx, timeout):
+        """Events after position idx; waits up to timeout for new ones. Returns (events, new idx)."""
+        with self._cond:
+            self._cond.wait_for(lambda: self._ev_total > idx, timeout)
+            have = self._ev_total
+            first = have - len(self._events)
+            return self._events[max(0, idx - first):], have
+
+    @staticmethod
+    def _heads(c):
+        return (c.execute("SELECT COALESCE(MAX(id),0) FROM frames").fetchone()[0],
+                c.execute("SELECT COALESCE(MAX(id),0) FROM fetches").fetchone()[0],
+                c.execute("SELECT COALESCE(MAX(seq),0) FROM log").fetchone()[0],
+                dbm.meta_get(c, "last_attempt_ms", 0))
+
+    def _watch(self, start):
+        """Every 2 s: anything new in the database? Turn it into events for the open consoles.
+        The fetch job is a separate process, so the database is the only place to look."""
+        heads = self._heads
+        last_f, last_x, last_l, attempt = start
+        fetching = self._fetching
+        while True:
+            time.sleep(2)
+            try:
+                with self.ro() as c:
+                    if not self._streams:   # nobody watching: just keep the bookmarks current
+                        last_f, last_x, last_l, attempt = heads(c)
+                        continue
+                    f, x, lg, att = heads(c)
+                    if (f, x, lg, att) == (last_f, last_x, last_l, attempt) and self._fetching == fetching:
+                        continue
+                    names = {r["norad"]: r["name"] for r in dbm.satellites(c, False)}
+                    frs = c.execute("SELECT id,ts_ms,observer,frame_type,decoded_ok,sunlit,sub_lat,sub_lon,norad,fetched_ms "
+                                    "FROM frames WHERE id>? ORDER BY id LIMIT 2000", (last_f,)).fetchall() if f != last_f else []
+                    fxs = c.execute("SELECT * FROM fetches WHERE id>? ORDER BY id", (last_x,)).fetchall() if x != last_x else []
+            except Exception:
+                continue
+            evs, hist_n, hist_old = [], 0, None
+            for r in frs:
+                if r["fetched_ms"] - r["ts_ms"] > 6 * 3600_000:   # filled-in history, not news
+                    hist_n += 1
+                    hist_old = r["ts_ms"] if hist_old is None else min(hist_old, r["ts_ms"])
+                    continue
+                evs.append(("frame", {"id": r["id"], "norad": r["norad"], "sat": names.get(r["norad"], str(r["norad"])),
+                                      "t": r["ts_ms"], "stored": r["fetched_ms"], "observer": r["observer"],
+                                      "type": r["frame_type"], "ok": bool(r["decoded_ok"]), "sunlit": r["sunlit"],
+                                      "lat": r["sub_lat"], "lon": r["sub_lon"], "saa": in_saa(r["sub_lat"], r["sub_lon"])}))
+            if hist_n:
+                evs.append(("history", {"n": hist_n, "oldest": hist_old}))
+            if frs:
+                evs.append(("data", {"max_id": frs[-1]["id"], "norads": sorted({r["norad"] for r in frs})}))
+            for r in fxs:
+                evs.append(("fetch", {"t": r["t_ms"], "ok": bool(r["ok"]), "message": r["message"],
+                                      "new": r["frames_new"], "norad": r["norad"]}))
+            if lg != last_l:
+                evs.append(("log", {"seq": lg}))
+            if att != attempt or (self._fetching and not fetching):
+                evs.append(("fetching", {"t": att}))
+            last_f = frs[-1]["id"] if len(frs) == 2000 else f
+            last_x, last_l, attempt, fetching = x, lg, att, self._fetching
+            if evs:
+                self._publish(evs)
+
     def fetch_now(self, sat=None):
         if self._fetching:
             return False, "A fetch is already running."
-        with self.lock:
-            last = dbm.smeta_get(self.conn, sat["norad"], "last_attempt_ms", 0) if sat else dbm.meta_get(self.conn, "last_attempt_ms", 0)
-            never_ok = bool(sat) and dbm.smeta_get(self.conn, sat["norad"], "last_ok_ms") is None
+        with self.ro() as c:
+            last = dbm.smeta_get(c, sat["norad"], "last_attempt_ms", 0) if sat else dbm.meta_get(c, "last_attempt_ms", 0)
+            never_ok = bool(sat) and dbm.smeta_get(c, sat["norad"], "last_ok_ms") is None
         if dbm.now_ms() - (last or 0) < 120_000 and not never_ok:
             return False, "Fetched less than two minutes ago. SatNOGS is volunteer-run, so give it a moment."
 
@@ -327,11 +479,18 @@ def make_handler(app):
         def log_message(self, fmt, *args):
             pass
 
+        def _gzip_ok(self):
+            return "gzip" in (self.headers.get("Accept-Encoding") or "")
+
         def _json(self, obj, status=200):
             body = json.dumps(obj, separators=(",", ":")).encode()
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.send_header("Cache-Control", "no-store")
+            if len(body) > 1400 and self._gzip_ok():   # telemetry JSON shrinks ~10x; cheap even on a Pi Zero
+                body = gzip.compress(body, 4)
+                self.send_header("Content-Encoding", "gzip")
+                self.send_header("Vary", "Accept-Encoding")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -368,14 +527,16 @@ def make_handler(app):
                 if p == "/api/summary":
                     return self._json(app.summary())
                 if p == "/api/catalog":
-                    with app.lock:
-                        return self._json(entries(app.conn, app.cfg))
+                    with app.ro() as c:
+                        return self._json(entries(c, app.cfg))
                 if p.startswith("/api/") and p not in ("/api/log", "/api/log/verify", "/api/notes", "/api/export/log.json", "/api/stream"):
                     sat = app.sat(q)
                 if p == "/api/config":
                     return self._json(app.config(sat))
                 if p == "/api/telemetry":
-                    return self._json(app.telemetry(sat, int(q.get("since", dbm.now_ms() - 7 * 86_400_000))))
+                    if "after_id" in q:
+                        return self._json(app.telemetry(sat, after_id=int(q["after_id"])))
+                    return self._json(app.telemetry(sat, since=int(q.get("since", dbm.now_ms() - 7 * 86_400_000))))
                 if p == "/api/frames":
                     return self._json(app.frames(sat, min(int(q.get("limit", 100)), 500), int(q.get("before", 2**53))))
                 if p == "/api/health":
@@ -399,20 +560,20 @@ def make_handler(app):
                 if p == "/api/stream":
                     return self._stream()
                 if p == "/api/log":
-                    with app.lock:
-                        return self._json(logchain.entries(app.conn, int(q.get("after", 0))))
+                    with app.ro() as c:
+                        return self._json(logchain.entries(c, int(q.get("after", 0))))
                 if p == "/api/log/verify":
-                    with app.lock:
-                        return self._json(logchain.verify(app.conn))
+                    with app.ro() as c:
+                        return self._json(logchain.verify(c))
                 if p == "/api/notes":
-                    with app.lock:
-                        return self._json(dbm.meta_get(app.conn, "notes", {"text": "", "cs": "", "t": 0}))
+                    with app.ro() as c:
+                        return self._json(dbm.meta_get(c, "notes", {"text": "", "cs": "", "t": 0}))
                 if p == "/api/export/telemetry.csv":
                     return self._text(export_csv(app, sat), "text/csv", f"{sat['name']}-telemetry.csv")
                 if p == "/api/export/log.json":
-                    with app.lock:
+                    with app.ro() as c:
                         data = {"satellite": app.cfg["satellite"], "exported_ms": dbm.now_ms(),
-                                "verify": logchain.verify(app.conn), "entries": logchain.entries(app.conn)}
+                                "verify": logchain.verify(c), "entries": logchain.entries(c)}
                     return self._text(json.dumps(data, indent=2), "application/json", "audit-log.json")
                 return self._static(p)
             except (ValueError, KeyError) as e:
@@ -458,59 +619,26 @@ def make_handler(app):
             self.wfile.write(f"event: {name}\ndata: {json.dumps(data, separators=(',', ':'))}\n\n".encode())
 
         def _stream(self):
-            """Server-sent events: frames the moment the Pi stores them, and fetch progress.
-            The fetch job is a separate process, so this watches the database (cheap: two
-            indexed lookups every 2 s per open console)."""
+            """Server-sent events: frames the moment the Pi stores them, fetch progress, new log
+            entries. One shared watcher feeds every open console."""
             if not app.stream_open():
                 return self._json({"error": "Too many consoles are streaming at once."}, 503)
             try:
-                with app.lock:
-                    last_f = app.conn.execute("SELECT COALESCE(MAX(id),0) FROM frames").fetchone()[0]
-                    last_x = app.conn.execute("SELECT COALESCE(MAX(id),0) FROM fetches").fetchone()[0]
-                    attempt = dbm.meta_get(app.conn, "last_attempt_ms", 0)
-                    names = {s["norad"]: s["name"] for s in dbm.satellites(app.conn, False)}
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
                 self.send_header("Cache-Control", "no-store")
                 self.send_header("X-Accel-Buffering", "no")
                 self.end_headers()
                 self._event("hello", {"now": dbm.now_ms(), "version": __version__})
-                end, beat = time.time() + 1800, time.time()
-                fetching = app._fetching
+                _, idx = app.events_since(10**12, 0)
+                end = time.time() + 1800
                 while time.time() < end:
-                    time.sleep(2)
-                    with app.lock:
-                        frs = app.conn.execute(
-                            "SELECT id,ts_ms,observer,frame_type,decoded_ok,sunlit,sub_lat,sub_lon,norad,fetched_ms FROM frames "
-                            "WHERE id>? ORDER BY id LIMIT 300", (last_f,)).fetchall()
-                        fxs = app.conn.execute("SELECT * FROM fetches WHERE id>? ORDER BY id", (last_x,)).fetchall()
-                        att = dbm.meta_get(app.conn, "last_attempt_ms", 0)
-                    hist_n, hist_old = 0, None
-                    for r in frs:
-                        last_f = r["id"]
-                        if r["norad"] not in names:
-                            names[r["norad"]] = str(r["norad"])
-                        if r["fetched_ms"] - r["ts_ms"] > 6 * 3600_000:   # filled-in history, not news
-                            hist_n += 1
-                            hist_old = r["ts_ms"] if hist_old is None else min(hist_old, r["ts_ms"])
-                            continue
-                        self._event("frame", {"id": r["id"], "norad": r["norad"], "sat": names.get(r["norad"]),
-                                              "t": r["ts_ms"], "stored": r["fetched_ms"], "observer": r["observer"],
-                                              "type": r["frame_type"], "ok": bool(r["decoded_ok"]), "sunlit": r["sunlit"],
-                                              "lat": r["sub_lat"], "lon": r["sub_lon"], "saa": in_saa(r["sub_lat"], r["sub_lon"])})
-                    if hist_n:
-                        self._event("history", {"n": hist_n, "oldest": hist_old})
-                    for r in fxs:
-                        last_x = r["id"]
-                        self._event("fetch", {"t": r["t_ms"], "ok": bool(r["ok"]), "message": r["message"],
-                                              "new": r["frames_new"], "norad": r["norad"]})
-                    if att != attempt or app._fetching != fetching:
-                        if (att != attempt) or app._fetching:
-                            self._event("fetching", {"t": att})
-                        attempt, fetching = att, app._fetching
-                    if time.time() - beat > 15:
+                    evs, idx2 = app.events_since(idx, 15)
+                    if idx2 == idx:
                         self.wfile.write(b": ping\n\n")
-                        beat = time.time()
+                    for name, data in evs:
+                        self._event(name, data)
+                    idx = idx2
             except (BrokenPipeError, ConnectionResetError, OSError):
                 pass
             finally:
@@ -524,12 +652,29 @@ def make_handler(app):
             f = (WEB / p.lstrip("/")).resolve()
             if WEB not in f.parents or not f.is_file():
                 return self._json({"error": "not found"}, 404)
-            body = f.read_bytes()
+            st = f.stat()
+            key = (str(f), st.st_mtime_ns, st.st_size)
+            hit = STATIC.get(str(f))
+            if not hit or hit[0] != key:   # read, compress and fingerprint once per file version
+                raw = f.read_bytes()
+                hit = (key, raw, gzip.compress(raw, 9), '"' + hashlib.sha1(raw).hexdigest()[:16] + '"')
+                STATIC[str(f)] = hit
+            _, raw, gz, etag = hit
+            if self.headers.get("If-None-Match") == etag:
+                self.send_response(304)
+                self.send_header("ETag", etag)
+                self.end_headers()
+                return
+            body = gz if self._gzip_ok() else raw
             self.send_response(200)
             self.send_header("Content-Type", (mimetypes.guess_type(str(f))[0] or "application/octet-stream")
                              + ("; charset=utf-8" if f.suffix in (".html", ".js", ".css", ".json") else ""))
+            if body is gz:
+                self.send_header("Content-Encoding", "gzip")
+                self.send_header("Vary", "Accept-Encoding")
+            self.send_header("ETag", etag)
+            self.send_header("Cache-Control", "no-cache")   # always revalidate, but a 304 costs nothing
             self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-cache")
             self.end_headers()
             self.wfile.write(body)
     return H
@@ -537,8 +682,8 @@ def make_handler(app):
 
 def export_csv(app, sat):
     ids = [c["id"] for c in app.spec(sat)["channels"]]
-    with app.lock:
-        rows = app.conn.execute("SELECT f.ts_ms, f.observer, f.frame_type, p.channel, p.value FROM frames f"
+    with app.ro() as c:
+        rows = c.execute("SELECT f.ts_ms, f.observer, f.frame_type, p.channel, p.value FROM frames f"
                                 " JOIN points p ON p.frame_id=f.id WHERE f.norad=? ORDER BY f.ts_ms", (sat["norad"],)).fetchall()
     by = {}
     for t, obs, ft, ch, v in rows:

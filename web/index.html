@@ -944,15 +944,18 @@ function renderFeed(){
     return `<li${cls}><span class="mono">${fmtT(f.at)}</span><span class="note">${esc(f.msg)}</span></li>`}).join(''):'<li><span></span><span class="note">Frames appear here the moment the Pi stores them.</span></li>';
 }
 function setLive(on,msg){streamOn=on;$('#liveDot').className='livedot'+(on?' on':'');$('#liveNote').textContent=msg}
-let afterFramesT=null;
+let afterFramesT=null,liveNew=0;
 function connectStream(){
   if(!window.EventSource){setLive(false,'Not supported in this browser');return}
   ES=new EventSource('/api/stream');
   ES.addEventListener('hello',()=>setLive(true,'Live · frames appear as the Pi stores them'));
   ES.addEventListener('frame',e=>{const d=JSON.parse(e.data);
     feedPush({kind:'frame',at:Date.now(),sat:d.sat,norad:d.norad,observer:d.observer,n:1,ok:d.ok?1:0,t0:d.t,t1:d.t,saa:d.saa,fresh:true});
-    if(d.norad===SAT){clearTimeout(afterFramesT);afterFramesT=setTimeout(async()=>{const n=FRAMES.length;await poll('tel');await Promise.all(['health','obs','model'].map(poll));refresh(true);
-      const k=FRAMES.length-n;if(k>0)toast(`${k} new frame${k>1?'s':''} of ${CONF.satellite.name} just arrived`);if(tab==='frames')loadFrames(false)},2500)}});
+    if(d.norad===SAT)liveNew++;});
+  ES.addEventListener('data',e=>{const d=JSON.parse(e.data);if(!d.norads.includes(SAT))return;
+    clearTimeout(afterFramesT);afterFramesT=setTimeout(async()=>{await poll('tel');await Promise.all(['health','obs','model'].map(poll));refresh(true);
+      if(liveNew>0)toast(`${liveNew} new frame${liveNew>1?'s':''} of ${CONF.satellite.name} just arrived`);liveNew=0;if(tab==='frames')loadFrames(false)},1500)});
+  ES.addEventListener('log',()=>poll('log'));
   ES.addEventListener('history',e=>{const d=JSON.parse(e.data);const top=FEED.find(f=>f.kind==='history'&&Date.now()-f.at<600000);
     if(top){top.n+=d.n;top.oldest=Math.min(top.oldest,d.oldest);top.at=Date.now();top.fresh=true;clearTimeout(feedT);feedT=setTimeout(renderFeed,250)}
     else feedPush({kind:'history',at:Date.now(),n:d.n,oldest:d.oldest,fresh:true})});
@@ -1032,26 +1035,43 @@ async function loadBattery(){try{BAT=await api('/api/battery');$('#batTab').hidd
 
 /* ---------- main render ---------- */
 let AV_cache={open:[],shelved:[],closed:[]};
+let lastDeriveSig='',lastDeriveT=0,lastTlmSig='';
 function refresh(force){
-  if(!CONF)return;const now=Date.now();D=derive(now);const AV=alertView(now);AV_cache=AV;
+  if(!CONF)return;const now=Date.now();
+  // Working out alerts walks every sample, so only redo it when something it depends on changed
+  // (new data, a signed action, fetch health, the schedule) or every 30 s for time-based ones.
+  const sig=[DATAV,LOG.length,HEALTH&&HEALTH.last_ok_ms,HEALTH&&HEALTH.last_attempt_ms,HEALTH&&HEALTH.storage&&HEALTH.storage.level,OBS&&OBS.refreshed_ms,OBS&&OBS.observations.length].join('|');
+  if(force||!D||sig!==lastDeriveSig||now-lastDeriveT>30000){D=derive(now);lastDeriveSig=sig;lastDeriveT=now}
+  const AV=alertView(now);AV_cache=AV;
   $('#utc').textContent=fmtT(now);$('#date').textContent=fmtD(now);
-  renderStrip(now,AV);renderTlm(now);renderObs(now);renderAlerts(AV);renderProc(now);renderEquip(now);renderRecent(now);renderContext(now);soundCheck(AV);renderModel();if(force||tick%15===0)renderSW(now);
-  if(force||tick%4===0)renderFrameChart(now);
+  const tsig=sig+'|'+Math.floor(now/15000);
+  renderStrip(now,AV);if(force||tsig!==lastTlmSig){renderTlm(now);lastTlmSig=tsig}renderObs(now);renderAlerts(AV);renderProc(now);renderEquip(now);renderRecent(now);renderContext(now);soundCheck(AV);renderModel();if(force||tick%15===0)renderSW(now);
+  if(force||tick%60===0||frameChartV!==DATAV){renderFrameChart(now);frameChartV=DATAV}
   if(tab==='passes')renderPasses(now);
   if(drawerCh)renderDrawer(false);
 }
-let tick=0;
+let tick=0,frameChartV=-1;
 
 /* ---------- data loading ---------- */
+let MAXID=0,DATAV=0;
 function addTelemetry(j){
-  for(const [t,ch,v] of j.points){const s=SERIES[ch]||(SERIES[ch]=[]);if(!s.length||t>s[s.length-1][0])s.push([t,v]);else if(!s.some(p=>p[0]===t)){s.push([t,v]);s.sort((a,b)=>a[0]-b[0])}lastPointT=Math.max(lastPointT,t)}
-  for(const f of j.frames){if(!FRAME_IDS.has(f[0])){FRAME_IDS.add(f[0]);FRAMES.push(f);if(f[5]!=null)SUNLIT_AT.set(f[1],f[5])}}
-  FRAMES.sort((a,b)=>a[1]-b[1]);
+  // points arrive grouped by channel; late uploads and filled-in history can be older than what we have,
+  // so append everything, then sort and de-duplicate only the channels that went out of order
+  const keep=Date.now()-8*DAY,touched=new Set();let added=0;
+  for(const ch in j.channels){const s=SERIES[ch]||(SERIES[ch]=[]);
+    for(const p of j.channels[ch]){if(p[0]<keep)continue;if(s.length&&p[0]<=s[s.length-1][0])touched.add(ch);s.push(p);added++;if(p[0]>lastPointT)lastPointT=p[0]}}
+  for(const ch of touched){const s=SERIES[ch];s.sort((a,b)=>a[0]-b[0]);let w=0;for(let i=0;i<s.length;i++){if(w&&s[i][0]===s[w-1][0])continue;s[w++]=s[i]}s.length=w}
+  let fr=false;for(const f of j.frames){if(f[1]<keep||FRAME_IDS.has(f[0]))continue;FRAME_IDS.add(f[0]);FRAMES.push(f);fr=true;if(f[5]!=null)SUNLIT_AT.set(f[1],f[5])}
+  if(fr)FRAMES.sort((a,b)=>a[1]-b[1]);
+  if(j.max_id)MAXID=Math.max(MAXID,j.max_id);
+  if(added||fr)DATAV++;
 }
 async function poll(kind){
   try{
-    if(kind==='tel'){const since=FRAMES.length?Math.max(0,FRAMES[FRAMES.length-1][1]-DAY):Date.now()-8*DAY;const j=await api('/api/telemetry?since='+since);addTelemetry(j);
-      if(CONF&&CONF.spec.auto&&j.points.some(p=>!CHM[p[1]])){CONF=await api('/api/config');CH=CONF.spec.channels||[];CHM=Object.fromEntries(CH.map(c=>[c.id,c]));buildTlm();renderAbout()}}
+    if(kind==='tel'){const seen=new Set();let j;
+      // first load: the last 8 days; after that only frames stored since we last asked
+      do{j=await api(MAXID?'/api/telemetry?after_id='+MAXID:'/api/telemetry?since='+(Date.now()-8*DAY));addTelemetry(j);Object.keys(j.channels).forEach(c=>seen.add(c))}while(j.more&&MAXID);
+      if(CONF&&CONF.spec.auto&&[...seen].some(ch=>!CHM[ch])){CONF=await api('/api/config');CH=CONF.spec.channels||[];CHM=Object.fromEntries(CH.map(c=>[c.id,c]));buildTlm();renderAbout()}}
     if(kind==='log'){const after=LOG.length?LOG[LOG.length-1].seq:0;const add=await api('/api/log?after='+after);if(add.length){LOG.push(...add);buildCfg()}}
     if(kind==='health')HEALTH=await api('/api/health');
     if(kind==='passes')PASSES=await api('/api/passes?hours=36');
@@ -1078,8 +1098,11 @@ async function boot(){
   Promise.all(['model','sw','sum'].map(poll)).then(()=>refresh(true));
   setInterval(()=>poll('model'),300000);setInterval(()=>poll('sw'),900000);setInterval(()=>poll('sum'),600000);
   setInterval(()=>{tick++;refresh(false)},1000);
-  setInterval(()=>poll('tel'),60000);setInterval(()=>{if(HEALTH&&(HEALTH.fetching||!FRAMES.length)){poll('tel');poll('health')}},10000);setInterval(()=>poll('log'),10000);setInterval(()=>poll('health'),20000);
-  setInterval(()=>poll('passes'),600000);setInterval(()=>poll('notes'),15000);
+  // With the live stream connected, new data and log entries are pushed, so polling is only a slow safety net.
+  const every=(fast,slow,fn)=>{let last=0;setInterval(()=>{const now=Date.now();if(now-last>=(streamOn?slow:fast)){last=now;fn()}},5000)};
+  every(60000,300000,()=>poll('tel'));every(10000,120000,()=>poll('log'));every(20000,60000,()=>poll('health'));
+  setInterval(()=>{if(HEALTH&&(HEALTH.fetching||!FRAMES.length)){poll('tel');poll('health')}},10000);
+  setInterval(()=>poll('passes'),600000);setInterval(()=>poll('notes'),30000);
   setInterval(()=>poll('obs'),120000);setInterval(()=>poll('now'),30000);setInterval(()=>poll('ecl'),1800000);
   setInterval(async()=>{try{FLEET=await api('/api/satellites');renderPicker()}catch(e){}},60000);
 }

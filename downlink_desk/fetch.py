@@ -118,7 +118,7 @@ def store(conn, sat_row, spec, frames):
             "fetched_ms,sunlit,sub_lat,sub_lon,norad) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (ts, str(f.get("observer") or "")[:80], str(f.get("station_id") or "")[:40] or None,
              str(f.get("app_source") or "")[:40], hexf, ftype or "Unrecognised",
-             1 if ftype else 0, json.dumps(fields if ftype else {}), dbm.now_ms(), *_context(orbit, ts), norad))
+             1 if ftype else 0, json.dumps(fields if ftype else {}, separators=(",", ":")), dbm.now_ms(), *_context(orbit, ts), norad))
         if cur.rowcount:
             new += 1
             fid = cur.lastrowid
@@ -214,7 +214,8 @@ def fetch_one(conn, cfg, client, sat_row, force, log):
     except satnogs.Refused as e:
         log(f"[{norad}] History paused: {e}")
     try:
-        notify.model_changes(conn, cfg, sat_row, baseline.compute(conn, spec, norad), log)
+        if new:   # the model only changes when data does; it's the heaviest step on a Pi Zero
+            notify.model_changes(conn, cfg, sat_row, baseline.compute(conn, spec, norad), log)
     except Exception as e:   # the model is an extra; a bad channel must never stop fetching
         log(f"[{norad}] Health model skipped: {e}")
     return 0
@@ -244,6 +245,7 @@ def run(cfg, force=False, log=print, only=None):
         for sat_row in dbm.satellites(conn):   # catch up orbit phases (also after an upgrade)
             baseline.fill_phases(conn, sat_row["norad"])
         notify.storage_check(conn, cfg, log)
+        conn.execute("PRAGMA optimize")   # keeps query plans good as the tables grow; near-free
         try:
             summary.maybe_send(conn, cfg, log)
         except Exception as e:
