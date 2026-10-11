@@ -132,10 +132,12 @@ def serve(port, token="test-token", page_size=25, require_token=True):
         def log_message(self, *a):
             pass
 
-        def _json(self, obj, code=200):
+        def _json(self, obj, code=200, link=None):
             b = json.dumps(obj).encode()
             self.send_response(code)
             self.send_header("Content-Type", "application/json")
+            if link:
+                self.send_header("Link", link)
             self.send_header("Content-Length", str(len(b)))
             self.end_headers()
             self.wfile.write(b)
@@ -163,10 +165,15 @@ def serve(port, token="test-token", page_size=25, require_token=True):
                     cat = [c for c in cat if str(c["norad_cat_id"]) == q["norad_cat_id"]]
                 return self._json(cat)
             if u.path == "/api/observations/":
+                if "page" in q:   # like the real API: cursor pagination only
+                    return self._json({"detail": "Invalid page."}, 400)
                 if q.get("norad_cat_id", "60237") != "60237":
                     return self._json([])
-                page = int(q.get("page", 1))
-                return self._json(observations[(page - 1) * 25: page * 25])
+                cur = int(q.get("cursor", 0))
+                page = observations[cur: cur + 25]
+                link = (f'<{base}/api/observations/?cursor={cur + 25}&norad_cat_id=60237&status=future>; rel="next"'
+                        if cur + 25 < len(observations) else None)
+                return self._json(page, link=link)
             if u.path == "/api/telemetry/":
                 if require_token and self.headers.get("Authorization") != f"Token {token}":
                     return self._json({"detail": "Authentication credentials were not provided."}, 401)
