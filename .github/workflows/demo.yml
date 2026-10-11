@@ -1,0 +1,79 @@
+# Builds the public live demo: fetches real GRBBeta telemetry from SatNOGS every 6 hours with the
+# same code a Raspberry Pi runs, then publishes a read-only snapshot of the console to GitHub Pages.
+#
+# One-time setup (repository Settings):
+#   Secrets and variables > Actions > New repository secret: SATNOGS_TOKEN = your SatNOGS DB API key
+#   Pages > Build and deployment > Source: GitHub Actions
+name: Live demo
+
+on:
+  schedule:
+    - cron: "23 */6 * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["web/**", "downlink_desk/**", "channels/**", "catalog/**", "demo-config.toml", ".github/workflows/demo.yml"]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: live-demo
+  cancel-in-progress: false
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: pip install -r requirements.txt
+
+      - name: Restore the demo database from the last run
+        uses: actions/cache/restore@v4
+        with:
+          path: demo/data
+          key: demo-db-${{ github.run_id }}
+          restore-keys: demo-db-
+
+      - name: Fetch from SatNOGS (and fill in three weeks of history on the first run)
+        env:
+          SATNOGS_TOKEN: ${{ secrets.SATNOGS_TOKEN }}
+        run: |
+          if [ -z "$SATNOGS_TOKEN" ]; then
+            echo "::error::Add your SatNOGS DB API key as a repository secret called SATNOGS_TOKEN"; exit 1
+          fi
+          mkdir -p demo/data
+          python -u -m downlink_desk.fetch --config demo-config.toml --force \
+            || echo "::warning::SatNOGS fetch had a problem; publishing the data we have"
+          python -u -m downlink_desk.fetch --config demo-config.toml --history 21 \
+            || echo "::warning::History fill stopped early; it carries on next run"
+
+      - name: Save the demo database for the next run
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: demo/data
+          key: demo-db-${{ github.run_id }}
+
+      - name: Export the read-only console
+        run: python -m downlink_desk.export_static --config demo-config.toml --out site
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - id: deploy
+        uses: actions/deploy-pages@v4

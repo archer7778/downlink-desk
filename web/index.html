@@ -276,7 +276,7 @@ pre.sum{margin:0;padding:12px 14px;font:12.5px/1.6 var(--f-mono);white-space:pre
       <label class="fld op"><span class="label">Call sign</span><input id="cs" placeholder="Initials" maxlength="16" autocomplete="off"></label>
       <label class="fld op" id="passFld" hidden><span class="label">Passcode</span><input id="pass" type="password" placeholder="For changes" maxlength="64" autocomplete="off"></label>
       <div class="fld"><span class="label">Alarm tone</span><button class="iconbtn" id="sound" aria-pressed="false">Off</button></div>
-      <div class="fld"><span class="label">Practice</span><a class="iconbtn" href="/training" target="_blank" rel="noopener">Training simulator ↗</a></div>
+      <div class="fld"><span class="label">Practice</span><a class="iconbtn" id="trainLink" href="/training" target="_blank" rel="noopener">Training simulator ↗</a></div>
     </div>
   </header>
 
@@ -454,7 +454,23 @@ const HOUR=3600000,DAY=86400000,MIN=60000;
 let toastT;function toast(m){const el=$('#toast');el.textContent=m;el.hidden=false;clearTimeout(toastT);toastT=setTimeout(()=>el.hidden=true,4000)}
 
 /* ---------- server API ---------- */
+/* Read-only demo: when the page is a published snapshot, read saved JSON files instead of a live Pi. */
+const ST=window.DD_STATIC||null;
+async function staticApi(path,opts){
+  if(opts&&opts.method==='POST'){const e=new Error('This is a read-only demo. Run Downlink Desk on your own Pi to sign actions.');e.status=403;e.body={message:e.message};throw e}
+  const [base,qs]=path.split('?'),q=new URLSearchParams(qs||''),n=base.replace(/^\/api\//,'');
+  if(n==='telemetry'&&q.has('after_id'))return {channels:{},frames:[],max_id:0};
+  if(n==='log'&&+(q.get('after')||0)>0)return [];
+  if(n==='frames'&&+(q.get('before')||0)<Date.now())return [];
+  const file=n==='log/verify'?'verify':n==='profile'?'profile/'+q.get('ch'):n;
+  const r=await fetch(ST.base+file+'.json',{cache:'no-cache'});
+  if(!r.ok){const e=new Error('Not in this snapshot');e.status=404;throw e}
+  const j=await r.json();
+  if(n==='now'){const t=Date.now();return j.reduce((b,x)=>!b||Math.abs(x.t-t)<Math.abs(b.t-t)?x:b,null)||{}}
+  return j;
+}
 async function api(path,opts){
+  if(ST)return staticApi(path,opts);
   const o=Object.assign({headers:{}},opts||{});
   if(o.body&&typeof o.body!=='string'){o.body=JSON.stringify(o.body);o.headers['Content-Type']='application/json'}
   if(PASS)o.headers['X-Passcode']=PASS;
@@ -562,7 +578,7 @@ function alertView(now){
 }
 
 /* ---------- actions (signed on the server) ---------- */
-function requireCs(){if(CS)return true;toast('Enter your call sign first. Every action is signed with it.');$('#cs').focus();return false}
+function requireCs(){if(ST){toast('This is a read-only demo. Run Downlink Desk on your own Pi to sign actions.');return false}if(CS)return true;toast('Enter your call sign first. Every action is signed with it.');$('#cs').focus();return false}
 async function act(kind,data,msg){
   if(!requireCs())return false;
   try{const e=await api('/api/log',{method:'POST',body:{kind,data,msg,cs:CS}});LOG.push(e);buildCfg();refresh(true);return true}
@@ -652,7 +668,7 @@ function renderEquip(now){SDL=HEALTH&&HEALTH.storage&&HEALTH.storage.level||'ok'
   const H=HEALTH;const fails=H?H.fetches.slice(0,3).filter(f=>!f.ok).length:0;
   const link=!H?['stale','Unknown','']:H.auth_error?['crit','Key rejected','SatNOGS refused the API key']:!H.token_present?['crit','No API key','Add it to secrets/satnogs_token']:(AV_cache.open.some(a=>a.key==='fetch'))?['crit','Down',H.fetches[0]?H.fetches[0].message:'']:fails?['warn','Degraded',H.fetches[0].message]:['ok','Operational',H.fetches[0]?H.fetches[0].message:'No fetches yet'];
   const auto=[
-    {name:'Raspberry Pi server',st:!online?['crit','Unreachable']:SDL==='crit'?['crit','Disk full']:SDL==='warn'?['warn','Low space']:['ok','Operational'],note:H?`Up ${ago(now-H.server_started_ms)} · ${sdText(H.storage)}`:''},
+    ST?{name:'Demo snapshot',st:['ok','Published'],note:`Built by GitHub Actions ${ago(now-ST.snapshot)} ago with the same code a Pi runs`}:{name:'Raspberry Pi server',st:!online?['crit','Unreachable']:SDL==='crit'?['crit','Disk full']:SDL==='warn'?['warn','Low space']:['ok','Operational'],note:H?`Up ${ago(now-H.server_started_ms)} · ${sdText(H.storage)}`:''},
     {name:'SatNOGS link',st:[link[0],link[1]],note:link[2]}];
   let html=auto.map(a=>`<tr><td style="width:1%"><span class="dot ${a.st[0]}"></span></td><td><div class="nm">${esc(a.name)}</div><div class="nt">${esc(a.note)}</div></td><td style="text-align:right"><span class="pill ${a.st[0]}">${esc(a.st[1])}</span></td></tr>`).join('');
   html+=MANUAL_EQ.map(e=>{const s=eqAt(e.id),pend=eqPending&&eqPending.id===e.id;
@@ -685,12 +701,13 @@ function renderLog(){const f=$('#logFilter').value,rows=mergedLog(Date.now()).fi
 function renderContext(now){
   const parts=[`<span>On duty: <b>${CFG.duty?esc(CFG.duty.cs):'nobody signed on'}</b>${CFG.duty?' since '+fmtDT(CFG.duty.t):''}</span>`];
   if(NOW&&NOW.lat!=null){const ch=NOW.next_change_ms;parts.push(`<span>${esc(CONF.satellite.name)} now: <b>${Math.abs(NOW.lat).toFixed(1)}°${NOW.lat>=0?'N':'S'} ${Math.abs(NOW.lon).toFixed(1)}°${NOW.lon>=0?'E':'W'}</b>, ${Math.round(NOW.alt_km)} km up, <b>${NOW.sunlit?'in sunlight':'in eclipse'}</b>${NOW.saa?', <b>over the South Atlantic Anomaly</b>':''}${ch&&ch>now?` · ${NOW.sunlit?'eclipse':'sunrise'} in ${Math.max(1,Math.round((ch-now)/MIN))} min`:''}</span>`)}
-  if(HEALTH){const next=HEALTH.last_attempt_ms?HEALTH.last_attempt_ms+CONF.poll_minutes*MIN:null;parts.push(`<span>Last fetch ${HEALTH.last_attempt_ms?ago(now-HEALTH.last_attempt_ms)+' ago':'never'}${next&&next>now?` · next in about ${Math.ceil((next-now)/MIN)} min`:''}</span>`,`<button class="btn sm" id="fetchNow" ${HEALTH.fetching?'disabled':''}>${HEALTH.fetching?'Fetching…':'Fetch now'}</button>`)}
+  if(HEALTH){const next=HEALTH.last_attempt_ms?HEALTH.last_attempt_ms+CONF.poll_minutes*MIN:null;parts.push(`<span>Last fetch ${HEALTH.last_attempt_ms?ago(now-HEALTH.last_attempt_ms)+' ago':'never'}${next&&next>now?` · next in about ${Math.ceil((next-now)/MIN)} min`:''}</span>`,(ST?'':`<button class="btn sm" id="fetchNow" ${HEALTH.fetching?'disabled':''}>${HEALTH.fetching?'Fetching…':'Fetch now'}</button>`))}
   $('#context').innerHTML=parts.join('');
-  const lb=$('#livebar');lb.classList.toggle('down',!online);$('#liveText').textContent=online?`Live · ${CONF.satellite.name} via SatNOGS`:'Lost contact with the Pi · retrying';
+  const lb=$('#livebar');lb.classList.toggle('down',!online);$('#liveText').textContent=ST?`Live demo · real ${CONF.satellite.name} data from SatNOGS · snapshot ${ago(now-ST.snapshot)} old, refreshed every ${ST.refresh_hours} h`:online?`Live · ${CONF.satellite.name} via SatNOGS`:'Lost contact with the Pi · retrying';
   const sb=$('#setupBanner');
   if(HEALTH&&!HEALTH.token_present){sb.hidden=false;sb.className='banner crit';sb.innerHTML='<b>One step left:</b> put your SatNOGS DB API key in <code>secrets/satnogs_token</code> on the Pi, then press Fetch now. Get the key at db.satnogs.org → your avatar → Settings / API Token.'}
   else if(PASSES&&PASSES.note&&/latitude/.test(PASSES.note)){sb.hidden=false;sb.className='banner warn';sb.textContent='Set your station latitude and longitude in config.toml and restart the server to see passes over you.'}
+  else if(ST){if(!sb.dataset.demo){sb.dataset.demo=1;sb.hidden=false;sb.className='banner';sb.innerHTML=`<span><b>You’re looking at a live demo.</b> This is the real Downlink Desk console, showing real telemetry from the CubeSat ${esc(CONF.satellite.name)} received by volunteer SatNOGS stations. A snapshot is rebuilt every ${ST.refresh_hours} hours; on a $15 Raspberry Pi at home it updates every 30 minutes and frames stream in live. Buttons that change things are off here.</span><span class="row"><a class="btn sm primary" href="${ST.repo}">Get it on GitHub</a><a class="btn sm" href="training">Try the simulator</a></span>`}}
   else sb.hidden=true;
 }
 
@@ -703,7 +720,7 @@ function renderPicker(){
   document.title=(cur.name||CONF.satellite.name)+' · Downlink Desk';
   const now=Date.now(),on=FLEET.filter(f=>f.enabled);
   $('#satMenu').innerHTML=on.map(f=>{const [cls,txt]=satStatus(f,now);return `<button class="satrow${f.norad===SAT?' cur':''}" data-pick="${f.norad}"><span class="dot ${cls}"></span><span class="nm">${esc(f.name)}</span><span class="mono note">${f.frames_24h} today</span><span class="sm">${esc(txt)}${f.next_obs_ms?' · next expected '+fmtHM(f.next_obs_ms):''}${f.size?' · '+esc(f.size):''}</span></button>`}).join('')
-    +`<div class="foot"><button class="btn sm primary" id="openCatalog">Track another satellite…</button></div>`;
+    +(ST?'':`<div class="foot"><button class="btn sm primary" id="openCatalog">Track another satellite…</button></div>`);
 }
 function togglePicker(open){const m=$('#satMenu');m.hidden=open===undefined?!m.hidden:!open;$('#satBtn').setAttribute('aria-expanded',!m.hidden)}
 function switchSat(n){lsSet('downlinkdesk.sat',n);location.search='?sat='+n}
@@ -946,6 +963,7 @@ function renderFeed(){
 function setLive(on,msg){streamOn=on;$('#liveDot').className='livedot'+(on?' on':'');$('#liveNote').textContent=msg}
 let afterFramesT=null,liveNew=0;
 function connectStream(){
+  if(ST){setLive(false,`Snapshot from ${fmtDT(ST.snapshot)}; on a real Pi frames stream in here live`);return}
   if(!window.EventSource){setLive(false,'Not supported in this browser');return}
   ES=new EventSource('/api/stream');
   ES.addEventListener('hello',()=>setLive(true,'Live · frames appear as the Pi stores them'));
@@ -1091,6 +1109,7 @@ async function boot(){
   CH=CONF.spec.channels||[];CHM=Object.fromEntries(CH.map(c=>[c.id,c]));online=true;
   SAT=CONF.satellite.norad;lsSet('downlinkdesk.sat',SAT);renderPicker();$('#csvLink').href='/api/export/telemetry.csv?sat='+SAT;
   $('#passFld').hidden=!CONF.write_protected;
+  if(ST){$('#csvLink').hidden=true;$('#trainLink').href='training';$('#cs').placeholder='Demo';$('#cs').disabled=true}
   buildTlm();
   await Promise.all(['tel','log','health','passes','notes','obs','now','ecl'].map(poll));
   renderAbout();refresh(true);if(tab!=='console')showTab(tab);

@@ -297,6 +297,15 @@ def test_model_spaceweather_summary_stream():
             raise AssertionError("expected 304")
         except urllib.error.HTTPError as e:
             assert e.code == 304
+        # the public demo: a read-only static snapshot of the same console
+        from downlink_desk import export_static
+        export_static.export(cfg, tmp / "site", log=lambda m: None)
+        page = (tmp / "site" / "index.html").read_text()
+        assert "window.DD_STATIC" in page and (tmp / "site" / "training.html").exists()
+        for f in ("config", "telemetry", "health", "model", "battery", "summary", "now", "frames", "log", "verify"):
+            json.loads((tmp / "site" / "api" / f"{f}.json").read_text())
+        assert json.loads((tmp / "site" / "api" / "health.json").read_text())["storage"] is None
+        assert (tmp / "site" / "api" / "profile" / "bat_t.json").exists()
         for path in ("/api/model", "/api/profile?ch=bat_t", "/api/spaceweather", "/api/summary"):
             j = json.loads(urllib.request.urlopen("http://127.0.0.1:8771" + path, timeout=30).read())
             assert "error" not in j, (path, j)
