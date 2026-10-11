@@ -11,3 +11,4 @@ db = "demo/data/downlink-desk.db"
 
 [satnogs]
 token_file = "demo/no-token-file"   # the API key comes from the SATNOGS_TOKEN repository secret
+history_days = 14                   # enough for the health model and battery check; keeps the first run short
