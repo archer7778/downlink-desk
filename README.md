@@ -19,7 +19,7 @@ Downlink Desk pulls real telemetry for a satellite from the [SatNOGS](https://sa
 
 > ⚠️ **Not flight software.** Downlink Desk is not affiliated with any satellite team, cannot command a spacecraft, and ships with provisional limits chosen for this console rather than the mission's own. Don't use it to make decisions about real hardware.
 
-![Downlink Desk console showing synthetic GRBBeta-format data](docs/screenshot.png)
+![Downlink Desk console showing live GRBBeta telemetry from SatNOGS, running on a Raspberry Pi Zero 2 W](docs/screenshot.png)
 *Screenshot from the test suite, using synthetic frames in GRBBeta's format.*
 
 **Try the training simulator in your browser:** enable GitHub Pages for the `docs/` folder and it's served at `https://archer7778.github.io/downlink-desk/`.

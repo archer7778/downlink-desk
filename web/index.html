@@ -604,7 +604,7 @@ function renderEquip(now){
   const H=HEALTH;const fails=H?H.fetches.slice(0,3).filter(f=>!f.ok).length:0;
   const link=!H?['stale','Unknown','']:H.auth_error?['crit','Key rejected','SatNOGS refused the API key']:!H.token_present?['crit','No API key','Add it to secrets/satnogs_token']:(AV_cache.open.some(a=>a.key==='fetch'))?['crit','Down',H.fetches[0]?H.fetches[0].message:'']:fails?['warn','Degraded',H.fetches[0].message]:['ok','Operational',H.fetches[0]?H.fetches[0].message:'No fetches yet'];
   const auto=[
-    {name:'Raspberry Pi server',st:online?['ok','Operational']:['crit','Unreachable'],note:H?`Up ${ago(now-H.server_started_ms)} · database ${(H.db_bytes/1e6).toFixed(1)} MB`:''},
+    {name:'Raspberry Pi server',st:online?['ok','Operational']:['crit','Unreachable'],note:H?`Up ${ago(now-H.server_started_ms)} · database ${H.db_bytes<1e6?Math.max(1,Math.round(H.db_bytes/1e3))+' kB':(H.db_bytes/1e6).toFixed(1)+' MB'}`:''},
     {name:'SatNOGS link',st:[link[0],link[1]],note:link[2]}];
   let html=auto.map(a=>`<tr><td style="width:1%"><span class="dot ${a.st[0]}"></span></td><td><div class="nm">${esc(a.name)}</div><div class="nt">${esc(a.note)}</div></td><td style="text-align:right"><span class="pill ${a.st[0]}">${esc(a.st[1])}</span></td></tr>`).join('');
   html+=MANUAL_EQ.map(e=>{const s=eqAt(e.id),pend=eqPending&&eqPending.id===e.id;
