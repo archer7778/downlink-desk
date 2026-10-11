@@ -60,6 +60,7 @@ sudo systemctl enable --now downlink-desk-web.service downlink-desk-fetch.timer 
 say "5/5  Done"
 PORT=$(cfgval port); PORT=${PORT:-8080}
 HOST=$(hostname)
-echo "  Console:  http://${HOST}.local:${PORT}   (or http://$(hostname -I | awk '{print $1}'):${PORT})"
+LANIP=$(ip -4 -o addr show wlan0 2>/dev/null | awk '{print $4}' | cut -d/ -f1); [ -z "$LANIP" ] && LANIP=$(ip -4 -o addr show eth0 2>/dev/null | awk '{print $4}' | cut -d/ -f1)
+echo "  Console:  http://${HOST}.local:${PORT}${LANIP:+   (or http://${LANIP}:${PORT})}"
 echo "  First fetch runs within two minutes. To fetch now:  $ROOT/.venv/bin/python -m downlink_desk.fetch --force"
 echo "  Logs:     journalctl -u downlink-desk-web -u downlink-desk-fetch -f"

@@ -1,32 +1,253 @@
 {
   "satellite": "GRBBeta",
-  "notes": "Field names come from the SatNOGS 'grbbeta' decoder. Limits are provisional, generic small-satellite values chosen for this console, not values published by the GRBBeta team. PSU scaling (millivolts, kelvin) is inferred from field names; check it against the mission's documentation and adjust 'transform' if the numbers look wrong.",
+  "notes": "Field names come from the SatNOGS 'grbbeta' decoder. Radio beacon units (temperatures in 0.01 °C, signal level as (value/2)-134 dBm, uptime in seconds) come from the GRBBeta team's published beacon format. Power-unit scaling is NOT published: temperatures are converted assuming 1/128 K steps, which matches the radio temperatures, and battery voltage and solar input are shown as raw counts until confirmed. Limits are provisional values chosen for this console.",
   "frame_types": [
-    {"name": "UHF beacon", "if_field": "uhf_uptime_total"},
-    {"name": "VHF beacon", "if_field": "vhf_uptime_total"},
-    {"name": "Power housekeeping", "if_field": "psu_bat_volt"},
-    {"name": "CW beacon", "if_field": "cw_beacon"},
-    {"name": "Digipeated message", "if_field": "digi_message"},
-    {"name": "Text message", "if_field": "message"}
+    {
+      "name": "UHF beacon",
+      "if_field": "uhf_uptime_total"
+    },
+    {
+      "name": "VHF beacon",
+      "if_field": "vhf_uptime_total"
+    },
+    {
+      "name": "Power housekeeping",
+      "if_field": "psu_bat_volt"
+    },
+    {
+      "name": "CW beacon",
+      "if_field": "cw_beacon"
+    },
+    {
+      "name": "Digipeated message",
+      "if_field": "digi_message"
+    },
+    {
+      "name": "Text message",
+      "if_field": "message"
+    }
   ],
   "channels": [
-    {"id": "bat_v", "sub": "Power", "name": "Battery voltage", "field": "psu_bat_volt", "transform": "mv_auto", "unit": "V", "dp": 2, "lim": null},
-    {"id": "bat_chg", "sub": "Power", "name": "Battery charge current", "field": "psu_bat_amp_charge", "unit": "mA", "dp": 0, "lim": null},
-    {"id": "bat_dis", "sub": "Power", "name": "Battery discharge current", "field": "psu_bat_amp_discharge", "unit": "mA", "dp": 0, "lim": null},
-    {"id": "pv1", "sub": "Power", "name": "Solar input 1", "field": "psu_pv_in_power1", "unit": "mW", "dp": 0, "lim": null},
-    {"id": "pv2", "sub": "Power", "name": "Solar input 2", "field": "psu_pv_in_power2", "unit": "mW", "dp": 0, "lim": null},
-    {"id": "psu_resets", "sub": "Power", "name": "Power unit resets", "field": "psu_reset_cnt", "unit": "", "dp": 0, "lim": null, "counter": "reboot"},
-    {"id": "bat_t", "sub": "Thermal", "name": "Battery temperature", "field": "psu_bat_temp_kelvin", "transform": "kelvin_auto", "unit": "°C", "dp": 1, "lim": [-10, 0, 45, 55]},
-    {"id": "psu_t", "sub": "Thermal", "name": "Power unit temperature", "field": "psu_system_temp_kelvin", "transform": "kelvin_auto", "unit": "°C", "dp": 1, "lim": [-30, -20, 60, 75]},
-    {"id": "uhf_mcu_t", "sub": "Thermal", "name": "UHF radio MCU temperature", "field": "uhf_radio_mcu_act_temperature", "unit": "°C", "dp": 0, "lim": [-30, -20, 60, 75]},
-    {"id": "uhf_pa_t", "sub": "Thermal", "name": "UHF power amplifier temperature", "field": "uhf_rf_power_amplifier_act_temperature", "unit": "°C", "dp": 0, "lim": [-30, -20, 65, 80]},
-    {"id": "vhf_mcu_t", "sub": "Thermal", "name": "VHF radio MCU temperature", "field": "vhf_radio_mcu_act_temperature", "unit": "°C", "dp": 0, "lim": [-30, -20, 60, 75]},
-    {"id": "vhf_pa_t", "sub": "Thermal", "name": "VHF power amplifier temperature", "field": "vhf_rf_power_amplifier_act_temperature", "unit": "°C", "dp": 0, "lim": [-30, -20, 65, 80]},
-    {"id": "uhf_rssi", "sub": "Radio", "name": "UHF receiver noise level", "field": "uhf_actual_rssi", "unit": "dBm", "dp": 0, "lim": null},
-    {"id": "uhf_up", "sub": "Radio", "name": "UHF radio uptime since reset", "field": "uhf_uptime_since_reset", "transform": "s_to_h", "unit": "h", "dp": 1, "lim": null, "counter": "uptime"},
-    {"id": "uhf_boots", "sub": "Radio", "name": "UHF radio boot count", "field": "uhf_radio_boot_count", "unit": "", "dp": 0, "lim": null, "counter": "reboot"},
-    {"id": "uhf_digi", "sub": "Radio", "name": "UHF digipeater messages", "field": "uhf_digipeater_forwarded_message_count", "unit": "", "dp": 0, "lim": null},
-    {"id": "vhf_up", "sub": "Radio", "name": "VHF radio uptime since reset", "field": "vhf_uptime_since_reset", "transform": "s_to_h", "unit": "h", "dp": 1, "lim": null, "counter": "uptime"},
-    {"id": "vhf_boots", "sub": "Radio", "name": "VHF radio boot count", "field": "vhf_radio_boot_count", "unit": "", "dp": 0, "lim": null, "counter": "reboot"}
+    {
+      "id": "bat_v",
+      "sub": "Power",
+      "name": "Battery voltage (raw count)",
+      "field": "psu_bat_volt",
+      "transform": "none",
+      "unit": "",
+      "dp": 0,
+      "lim": null
+    },
+    {
+      "id": "bat_chg",
+      "sub": "Power",
+      "name": "Battery charge current",
+      "field": "psu_bat_amp_charge",
+      "unit": "mA",
+      "dp": 0,
+      "lim": null
+    },
+    {
+      "id": "bat_dis",
+      "sub": "Power",
+      "name": "Battery discharge current",
+      "field": "psu_bat_amp_discharge",
+      "unit": "mA",
+      "dp": 0,
+      "lim": null
+    },
+    {
+      "id": "pv1",
+      "sub": "Power",
+      "name": "Solar input 1 (raw count)",
+      "field": "psu_pv_in_power1",
+      "unit": "",
+      "dp": 0,
+      "lim": null
+    },
+    {
+      "id": "pv2",
+      "sub": "Power",
+      "name": "Solar input 2 (raw count)",
+      "field": "psu_pv_in_power2",
+      "unit": "",
+      "dp": 0,
+      "lim": null
+    },
+    {
+      "id": "psu_resets",
+      "sub": "Power",
+      "name": "Power unit resets",
+      "field": "psu_reset_cnt",
+      "unit": "",
+      "dp": 0,
+      "lim": null,
+      "counter": "reboot"
+    },
+    {
+      "id": "bat_t",
+      "sub": "Thermal",
+      "name": "Battery temperature",
+      "field": "psu_bat_temp_kelvin",
+      "transform": "scale",
+      "unit": "°C",
+      "dp": 1,
+      "lim": [
+        -10,
+        0,
+        45,
+        55
+      ],
+      "scale": 0.0078125,
+      "offset": -273.15
+    },
+    {
+      "id": "psu_t",
+      "sub": "Thermal",
+      "name": "Power unit temperature",
+      "field": "psu_system_temp_kelvin",
+      "transform": "scale",
+      "unit": "°C",
+      "dp": 1,
+      "lim": [
+        -30,
+        -20,
+        60,
+        75
+      ],
+      "scale": 0.0078125,
+      "offset": -273.15
+    },
+    {
+      "id": "uhf_mcu_t",
+      "sub": "Thermal",
+      "name": "UHF radio MCU temperature",
+      "field": "uhf_radio_mcu_act_temperature",
+      "unit": "°C",
+      "dp": 1,
+      "lim": [
+        -30,
+        -20,
+        60,
+        75
+      ],
+      "transform": "scale",
+      "scale": 0.01,
+      "offset": 0
+    },
+    {
+      "id": "uhf_pa_t",
+      "sub": "Thermal",
+      "name": "UHF power amplifier temperature",
+      "field": "uhf_rf_power_amplifier_act_temperature",
+      "unit": "°C",
+      "dp": 1,
+      "lim": [
+        -30,
+        -20,
+        65,
+        80
+      ],
+      "transform": "scale",
+      "scale": 0.01,
+      "offset": 0
+    },
+    {
+      "id": "vhf_mcu_t",
+      "sub": "Thermal",
+      "name": "VHF radio MCU temperature",
+      "field": "vhf_radio_mcu_act_temperature",
+      "unit": "°C",
+      "dp": 1,
+      "lim": [
+        -30,
+        -20,
+        60,
+        75
+      ],
+      "transform": "scale",
+      "scale": 0.01,
+      "offset": 0
+    },
+    {
+      "id": "vhf_pa_t",
+      "sub": "Thermal",
+      "name": "VHF power amplifier temperature",
+      "field": "vhf_rf_power_amplifier_act_temperature",
+      "unit": "°C",
+      "dp": 1,
+      "lim": [
+        -30,
+        -20,
+        65,
+        80
+      ],
+      "transform": "scale",
+      "scale": 0.01,
+      "offset": 0
+    },
+    {
+      "id": "uhf_rssi",
+      "sub": "Radio",
+      "name": "UHF receiver signal level",
+      "field": "uhf_actual_rssi",
+      "unit": "dBm",
+      "dp": 1,
+      "lim": null,
+      "transform": "scale",
+      "scale": 0.5,
+      "offset": -134
+    },
+    {
+      "id": "uhf_up",
+      "sub": "Radio",
+      "name": "UHF radio uptime since reset",
+      "field": "uhf_uptime_since_reset",
+      "transform": "s_to_h",
+      "unit": "h",
+      "dp": 1,
+      "lim": null,
+      "counter": "uptime"
+    },
+    {
+      "id": "uhf_boots",
+      "sub": "Radio",
+      "name": "UHF radio boot count",
+      "field": "uhf_radio_boot_count",
+      "unit": "",
+      "dp": 0,
+      "lim": null,
+      "counter": "reboot"
+    },
+    {
+      "id": "uhf_digi",
+      "sub": "Radio",
+      "name": "UHF digipeater messages",
+      "field": "uhf_digipeater_forwarded_message_count",
+      "unit": "",
+      "dp": 0,
+      "lim": null
+    },
+    {
+      "id": "vhf_up",
+      "sub": "Radio",
+      "name": "VHF radio uptime since reset",
+      "field": "vhf_uptime_since_reset",
+      "transform": "s_to_h",
+      "unit": "h",
+      "dp": 1,
+      "lim": null,
+      "counter": "uptime"
+    },
+    {
+      "id": "vhf_boots",
+      "sub": "Radio",
+      "name": "VHF radio boot count",
+      "field": "vhf_radio_boot_count",
+      "unit": "",
+      "dp": 0,
+      "lim": null,
+      "counter": "reboot"
+    }
   ]
 }
