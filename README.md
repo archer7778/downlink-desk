@@ -2,7 +2,7 @@
 
 **A mission-control console for a real satellite, running on a $15 Raspberry Pi Zero 2 W.**
 
-Downlink Desk watches real CubeSats in orbit. It pulls their telemetry from the [SatNOGS](https://satnogs.org) volunteer ground-station network, decodes it on the Pi, learns what normal looks like for each spacecraft, and runs a small operations console around it: alarms, a live feed, phone alerts, space weather and a signed audit trail. It uses almost none of the Pi: load average 0.00, about 150 MB of RAM, 1.4 MB of data for the first 200 frames.
+Downlink Desk watches real CubeSats in orbit. It pulls their telemetry from the [SatNOGS](https://satnogs.org) volunteer ground-station network, decodes it on the Pi, learns what normal looks like for each spacecraft, and runs a small operations console around it: alarms, a live feed, phone alerts, space weather and a signed audit trail. It barely touches the Pi: load average 0.00, about 150 MB of RAM, and roughly 1.5 GB of data a year for a busy CubeSat, so a 32 GB card lasts about 15 years.
 
 ![Downlink Desk console showing live GRBBeta telemetry from SatNOGS, running on a Raspberry Pi Zero 2 W](docs/screenshot.png)
 *Live data: GRBBeta, a 2U CubeSat from Slovakia, as seen by a Pi Zero 2 W in Da Nang.*
@@ -36,9 +36,15 @@ Downlink Desk watches real CubeSats in orbit. It pulls their telemetry from the 
 - **Shift handover report, daily check, equipment status,** and a **training simulator** with fault injection.
 - **Several satellites at once:** a picker with bios for featured CubeSats, and a catalog of every satellite in orbit that SatNOGS can decode.
 
+**Light enough for a $15 computer**
+- **Fills in its own history:** a new install pulls three weeks of older frames from SatNOGS, a few pages per fetch, so the model and battery check have something to learn from on day one.
+- **Sends only what changed:** an open console asks for frames stored since it last checked (75 bytes when there's nothing new), gets new data and log entries pushed over one shared live stream, and everything is gzip-compressed.
+- **Never makes you wait on a slow sum:** reads run on their own connections alongside the fetch job, and the model, battery check and summary are worked out once per batch of new data, not per request.
+- Measured on three weeks of data (15,500 frames): idle polling down from 160 KB a minute to almost nothing, the morning summary from 287 ms to 3 ms, and browser work while watching down five-fold.
+
 > ⚠️ **Not flight software.** Downlink Desk is not affiliated with any satellite team, cannot command a spacecraft, and ships with provisional limits chosen for this console rather than the mission's own. Don't use it to make decisions about real hardware.
 
-**Try the training simulator in your browser:** <https://archer7778.github.io/downlink-desk/> (once GitHub Pages is switched on for the `docs/` folder).
+**Try the training simulator in your browser:** <https://archer7778.github.io/downlink-desk/>. It's a self-contained practice version with simulated faults, no Pi needed.
 
 ## How it works
 
@@ -52,11 +58,12 @@ NOAA space weather (every 3 h) ────────────────�
 - `downlink_desk/fetch.py` asks the SatNOGS DB API for new frames, politely: at least 11 s between requests, honours `Retry-After`, holds satellites flagged as frequency violators to one request a day.
 - Frames are decoded locally with the community [satnogs-decoders](https://pypi.org/project/satnogs-decoders/) package and mapped to channels by a small JSON file.
 - `downlink_desk/server.py` is a standard-library web server that serves the console and a JSON API, and signs audit-log entries.
-- Scheduled observations come from the public SatNOGS Network API every 3 hours, one request.
+- Scheduled observations come from the public SatNOGS Network API every 3 hours, following its paged list.
 - Sunlight and position come from the latest orbit data (SGP4 plus a cylindrical Earth-shadow model).
 - Alerts are worked out in the browser from the stored telemetry, so every viewer sees the same thing. Phone alerts are checked by the fetch job on the Pi.
 - `downlink_desk/baseline.py` is the learned model: robust medians in 5-minute bins of orbit phase, a seasonal correction for shadow length, and drift judged on effect size and significance together, so a single noisy pass can't trigger it.
 - `downlink_desk/battery.py` places every frame in the orbit's day/night cycle and integrates charge and discharge current around it; internal resistance comes from how voltage moves with current once the orbit pattern is removed.
+- `deploy/update.sh` (run by a systemd timer after boot and nightly) fast-forwards from GitHub, installs new packages, restarts the console, checks it answers, and rolls back if not.
 - `downlink_desk/spacewx.py` reads NOAA SWPC's public JSON products; `downlink_desk/summary.py` builds the morning summary (`python -m downlink_desk.fetch --summary` prints it).
 
 The first satellite is **GRBBeta** (NORAD 60237), a 2U CubeSat from the Technical University of Košice testing a gamma-ray detector. Track more from the **satellite picker** in the console header: it lists every satellite in orbit that SatNOGS can decode, with hand-written bios for a featured few (CroCube, Foresail-1p, CatSat, CubeBel-2, Sharjahsat-1, UWE-4). Satellites without a curated channels file get automatic channels: every numeric field the decoder produces, in raw units.
@@ -72,7 +79,7 @@ cd downlink-desk
 ./deploy/install.sh
 ```
 
-The installer asks for your location and API key, installs two background services, and prints the console address (for example `http://groundpi.local:8080`).
+The installer asks for your location and API key, sets up the console, the fetch job and the updater to start at every boot, and prints the console address (for example `http://groundpi.local:8080`). After that it keeps itself up to date. Optional extras in `config.toml`: phone alerts (`ntfy_topic`), your time zone for the morning summary, and `auto_update = false` if you'd rather update by hand.
 
 ## Develop and test
 
