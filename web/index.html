@@ -286,6 +286,7 @@ pre.sum{margin:0;padding:12px 14px;font:12.5px/1.6 var(--f-mono);white-space:pre
   <nav class="tabs" role="tablist">
     <button role="tab" data-tab="console" aria-selected="true">Console<span class="count" id="alertCount"></span></button>
     <button role="tab" data-tab="frames" aria-selected="false">Frames<span class="count" id="frameCount"></span></button>
+    <button role="tab" data-tab="battery" aria-selected="false" id="batTab" hidden>Battery</button>
     <button role="tab" data-tab="passes" aria-selected="false">Passes &amp; stations</button>
     <button role="tab" data-tab="log" aria-selected="false">Audit trail<span class="count" id="logCount"></span></button>
     <button role="tab" data-tab="handover" aria-selected="false">Shift handover</button>
@@ -358,6 +359,8 @@ pre.sum{margin:0;padding:12px 14px;font:12.5px/1.6 var(--f-mono);white-space:pre
     <div class="dt"><table><thead><tr><th>Time (UTC)</th><th>Heard by</th><th>Satellite</th><th>Type</th><th>Key values</th></tr></thead><tbody id="frameBody"></tbody></table></div>
     <div class="pb"><button class="btn" id="olderFrames">Load older frames</button></div>
   </section>
+
+  <section id="tab-battery" class="stack" hidden><div class="stack" id="batBody"></div></section>
 
   <section id="tab-passes" class="stack" hidden>
     <div class="panel">
@@ -974,6 +977,47 @@ function renderSummary(){
   $('#sumSend').hidden=!SUM.phone;
 }
 
+/* ---------- battery tab ---------- */
+let BAT=null;
+const B_ST={ok:['ok','OK'],warn:['warn','Watch'],crit:['crit','Concern'],info:['acc','Info'],unknown:['','Not yet']};
+const B_GRADE={good:['ok','Good'],watch:['warn','Watch'],concern:['crit','Concern'],learning:['','Gathering data']};
+function batChart(B){
+  const P=B.period_min,prof=B.profile||[],sh=B.shadow_min;if(!prof.length)return '';
+  const nets=prof.map(p=>p[1]).filter(v=>v!=null),vs=prof.map(p=>p[2]).filter(v=>v!=null);if(!nets.length)return '';
+  let lo=Math.min(0,...nets),hi=Math.max(0,...nets);const pd=(hi-lo)*.1||50;lo-=pd;hi+=pd;
+  const raw=(hi-lo)/4,mag=Math.pow(10,Math.floor(Math.log10(raw))),stp=[1,2,2.5,5,10].map(k=>k*mag).find(k=>k>=raw);lo=Math.floor(lo/stp)*stp;hi=Math.ceil(hi/stp)*stp;
+  let vlo=Math.min(...vs),vhi=Math.max(...vs);if(vhi-vlo<.05){vlo-=.05;vhi+=.05}const vp=(vhi-vlo)*.15;vlo-=vp;vhi+=vp;
+  const W=1100,H=300,L0=56,R0=56,T0=18,B0=28,X=m=>L0+m/P*(W-L0-R0),Y=v=>T0+(hi-v)/(hi-lo)*(H-T0-B0),YV=v=>T0+(vhi-v)/(vhi-vlo)*(H-T0-B0);let g='';
+  if(sh){g+=`<rect x="${X(P-sh).toFixed(1)}" y="${T0}" width="${(X(P)-X(P-sh)).toFixed(1)}" height="${H-T0-B0}" fill="var(--stale)" fill-opacity=".16"/><text x="${X(P-sh/2).toFixed(1)}" y="${T0-5}" text-anchor="middle" font-size="10.5" fill="var(--muted)" font-family="IBM Plex Sans Condensed,sans-serif" letter-spacing=".06em">EARTH’S SHADOW</text><text x="${X((P-sh)/2).toFixed(1)}" y="${T0-5}" text-anchor="middle" font-size="10.5" fill="var(--muted)" font-family="IBM Plex Sans Condensed,sans-serif" letter-spacing=".06em">SUNLIGHT</text>`}
+  for(let v=lo;v<=hi+1e-9;v+=stp){const y=Y(v);g+=`<line x1="${L0}" x2="${W-R0}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" stroke="var(--line)"/><text x="${L0-6}" y="${(y+3.5).toFixed(1)}" text-anchor="end" font-size="10.5" font-family="IBM Plex Mono,monospace" fill="var(--muted)">${v.toFixed(0)}</text><text x="${W-R0+6}" y="${(y+3.5).toFixed(1)}" font-size="10.5" font-family="IBM Plex Mono,monospace" fill="var(--t2)">${(vlo+(vhi-vlo)*(1-(y-T0)/(H-T0-B0))).toFixed(2)}</text>`}
+  g+=`<line x1="${L0}" x2="${W-R0}" y1="${Y(0).toFixed(1)}" y2="${Y(0).toFixed(1)}" stroke="var(--muted)"/>`;
+  const bw=(X(5)-X(0))-2;
+  for(const [m,n] of prof){if(n==null)continue;const y0=Y(0),y=Y(n),x0=X(m)-bw/2,w=Math.max(1,Math.min(bw,X(P)-1-x0));g+=`<rect x="${x0.toFixed(1)}" y="${Math.min(y,y0).toFixed(1)}" width="${w.toFixed(1)}" height="${Math.max(1,Math.abs(y-y0)).toFixed(1)}" fill="${n>=0?'var(--ok)':'var(--crit)'}" fill-opacity=".7"><title>${m.toFixed(0)} min after sunrise · net ${n>=0?'+':''}${n.toFixed(0)} mA</title></rect>`}
+  const vl=prof.filter(p=>p[2]!=null).map(p=>X(p[0]).toFixed(1)+','+YV(p[2]).toFixed(1));if(vl.length>1)g+=`<polyline points="${vl.join(' ')}" fill="none" stroke="var(--t2)" stroke-width="2"/>`;
+  for(let m=0;m<=P;m+=15)g+=`<text x="${X(m).toFixed(1)}" y="${H-9}" text-anchor="middle" font-size="10.5" font-family="IBM Plex Mono,monospace" fill="var(--muted)">${m}</text>`;
+  g+=`<text x="12" y="${(T0+(H-T0-B0)/2).toFixed(0)}" font-size="10.5" fill="var(--muted)" transform="rotate(-90 12 ${(T0+(H-T0-B0)/2).toFixed(0)})" text-anchor="middle">net current, mA</text><text x="${W-8}" y="${(T0+(H-T0-B0)/2).toFixed(0)}" font-size="10.5" fill="var(--t2)" transform="rotate(90 ${W-8} ${(T0+(H-T0-B0)/2).toFixed(0)})" text-anchor="middle">battery volts</text>`;
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Battery charge and voltage around one orbit">${g}</svg>`;
+}
+function renderBattery(){
+  const box=$('#batBody');if(!BAT){box.innerHTML='<div class="panel empty">Loading…</div>';return}
+  if(!BAT.available){box.innerHTML='<div class="panel pb"><p class="note">No battery description for this satellite. Add a "battery" section to its channels file to turn this on.</p></div>';return}
+  const [gc,gl]=B_GRADE[BAT.grade]||['',BAT.grade],A=BAT.assumptions,L=BAT.life;
+  let h=`<div class="panel pb stack" style="padding:18px"><div class="row" style="justify-content:space-between"><div class="stack" style="gap:6px"><span class="label">Battery health · last ${BAT.window_days} days · ${BAT.samples} frames</span><span style="font:600 26px/1.1 var(--f-display)"><span class="pill ${gc}" style="font-size:13px;padding:6px 10px;vertical-align:4px">${gl}</span></span></div>
+    ${L?`<div class="stack" style="gap:4px;min-width:min(320px,100%)"><span class="label">Estimated capacity left (model)</span><div style="position:relative;height:14px;background:var(--sunk);border-radius:7px;overflow:hidden"><div style="position:absolute;left:${(L.capacity_range[0]*100).toFixed(1)}%;width:${((L.capacity_range[1]-L.capacity_range[0])*100).toFixed(1)}%;top:0;bottom:0;background:var(--accent);opacity:.3"></div><div style="position:absolute;left:0;width:${(L.capacity_now*100).toFixed(1)}%;top:5px;height:4px;background:var(--accent)"></div><div style="position:absolute;left:${(BAT.life_params.eol_capacity*100).toFixed(0)}%;top:0;bottom:0;width:2px;background:var(--crit)" title="End of life"></div></div><span class="note">≈${(L.capacity_now*100).toFixed(0)}% (range ${(L.capacity_range[0]*100).toFixed(0)}–${(L.capacity_range[1]*100).toFixed(0)}%) · red line is end of life at ${(BAT.life_params.eol_capacity*100).toFixed(0)}% · ${L.years_left_range[0]}–${L.years_left_range[1]} years to go</span></div>`:''}</div>
+    ${BAT.grade==='learning'?`<p class="note">Needs ${BAT.need} more frames with a known orbit position before it can judge anything. That usually takes a day or two.</p>`:''}
+    <p class="note">Measured checks come straight from the satellite’s own telemetry. The life estimate is a model built on assumed battery data (below), so read it as a rough guide, not a measurement.</p></div>`;
+  if(BAT.profile)h+=`<div class="panel"><div class="ph"><h2>Charge around one orbit</h2><span class="sub">${BAT.balance_mah!=null?`Net ${BAT.balance_mah>=0?'+':''}${BAT.balance_mah} mAh per orbit`:''}${BAT.eclipse_mah!=null?` · ${BAT.eclipse_mah} mAh used per eclipse`:''} · ${Math.round((BAT.coverage||0)*100)}% of the orbit covered</span></div><div class="chartbox">${batChart(BAT)}</div>
+    <div class="legend"><span><i class="band" style="background:var(--ok)"></i>Charging (more in than out)</span><span><i class="band" style="background:var(--crit)"></i>Discharging</span><span><i style="background:var(--t2)"></i>Battery voltage</span><span><i class="band" style="background:var(--stale);opacity:.4"></i>Earth’s shadow</span></div></div>`;
+  h+=`<div class="panel"><div class="ph"><h2>Checks</h2></div>${BAT.checks.map(c=>{const [cl,lb]=B_ST[c.status]||['',c.status];return `<div class="alert"><span class="pill ${cl}">${lb}</span><span class="msg">${esc(c.title)} <span class="mono" style="font-weight:600;margin-left:6px">${esc(c.value)}</span></span><span></span><span class="meta" style="font-family:var(--f-body);font-size:13px">${esc(c.detail)}</span></div>`}).join('')||'<div class="empty">No checks yet.</div>'}</div>`;
+  const lp=BAT.life_params;
+  h+=`<div class="panel"><div class="ph"><h2>Assumptions</h2><span class="sub">Edit under "battery" in the channels file</span></div><div class="pb stack"><p class="note">${esc(A.source||'')}</p>
+    <dl class="kv">${[['Chemistry',A.chemistry],['Capacity',`${A.capacity_wh} Wh ≈ ${BAT.capacity_mah} mAh at ${A.nominal_v} V`],['Full / empty',`${A.v_full} V / ${A.v_empty} V`],['Voltage scale',BAT.volt_scale?`${BAT.volt_scale} V per count${A.voltage&&A.voltage.scale==='auto'?' (worked out from the data)':''}`:'unknown'],['Charge window',`${(A.charge_temp||[0,45]).join(' to ')} °C`],['Discharge window',`${(A.discharge_temp||[-20,60]).join(' to ')} °C`],
+      ['Cycle life model',`${lp.cycles_at_100_dod.toLocaleString()} cycles at 100% depth × depth^−${lp.dod_exponent}, to ${(lp.eol_capacity*100).toFixed(0)}% capacity; shorter when hotter than ${lp.ref_temp_c} °C`],['Calendar ageing',`${(lp.calendar_fade_per_year*100).toFixed(0)}% a year at ${lp.ref_temp_c} °C, doubling every ${lp.temp_doubling_c} °C`],
+      ['Orbit',`${BAT.period_min} min, ${BAT.shadow_min??'—'} min in shadow now`],['Cycles so far',BAT.cycles!=null?`${BAT.cycles.toLocaleString()} (one per orbit since launch, ${BAT.years} years)`:'—']].map(([k,v])=>`<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl></div></div>`;
+  box.innerHTML=h;
+}
+async function loadBattery(){try{BAT=await api('/api/battery');$('#batTab').hidden=!BAT.available;if(tab==='battery')renderBattery()}catch(e){}}
+
 /* ---------- main render ---------- */
 let AV_cache={open:[],shelved:[],closed:[]};
 function refresh(force){
@@ -1018,7 +1062,7 @@ async function boot(){
   buildTlm();
   await Promise.all(['tel','log','health','passes','notes','obs','now','ecl'].map(poll));
   renderAbout();refresh(true);if(tab!=='console')showTab(tab);
-  seedFeed();connectStream();
+  seedFeed();connectStream();loadBattery();setInterval(loadBattery,600000);
   Promise.all(['model','sw','sum'].map(poll)).then(()=>refresh(true));
   setInterval(()=>poll('model'),300000);setInterval(()=>poll('sw'),900000);setInterval(()=>poll('sum'),600000);
   setInterval(()=>{tick++;refresh(false)},1000);
@@ -1029,7 +1073,8 @@ async function boot(){
 }
 
 /* ---------- events ---------- */
-function showTab(t){tab=t;$$('nav.tabs button').forEach(b=>b.setAttribute('aria-selected',b.dataset.tab===t));['console','frames','passes','log','handover','about'].forEach(x=>$('#tab-'+x).hidden=x!==t);
+function showTab(t){tab=t;$$('nav.tabs button').forEach(b=>b.setAttribute('aria-selected',b.dataset.tab===t));['console','frames','battery','passes','log','handover','about'].forEach(x=>$('#tab-'+x).hidden=x!==t);
+  if(t==='battery'){renderBattery();loadBattery()}
   if(t==='log')renderLog();if(t==='handover')renderHandover();if(t==='passes')renderPasses(Date.now());if(t==='frames')loadFrames(false);if(t==='about')renderAbout();savePrefs()}
 $('nav.tabs').addEventListener('click',e=>{const b=e.target.closest('button');if(b)showTab(b.dataset.tab)});
 document.addEventListener('click',async e=>{

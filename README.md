@@ -14,6 +14,10 @@ Downlink Desk watches real CubeSats in orbit. It pulls their telemetry from the 
 - **Orbit profile charts:** each channel plotted against minutes since sunrise, with the learned curve, its normal spread, and the latest readings on top.
 - **Drift and oddity alerts** when a channel moves away from its own history, separate from the fixed limits.
 
+**Checks the battery**
+- **Battery health tab:** charge in and out around a whole orbit, how deep each eclipse drains the battery, whether it gets back to full in sunlight, voltage left at the end of eclipse and its trend, time spent outside lithium-ion's safe temperatures, and an effective internal resistance that rises as cells age.
+- **Life estimate:** charge cycles since launch (about 12,000 for GRBBeta so far) against a cycle-life model for lithium-ion at the measured depth and temperature, giving an estimated capacity left and years to end of life, with a range. Battery details the team hasn't published are written down as assumptions, with their source, in one editable file.
+
 **Watches the satellite and the network**
 - **Live feed:** frames appear in every open console the moment the Pi stores them (server-sent events).
 - **Expected vs received:** reads the SatNOGS Network schedule, so it knows which stations will listen and when, scores every observation as heard or empty, and counts down to the next data.
@@ -51,6 +55,7 @@ NOAA space weather (every 3 h) ────────────────�
 - Sunlight and position come from the latest orbit data (SGP4 plus a cylindrical Earth-shadow model).
 - Alerts are worked out in the browser from the stored telemetry, so every viewer sees the same thing. Phone alerts are checked by the fetch job on the Pi.
 - `downlink_desk/baseline.py` is the learned model: robust medians in 5-minute bins of orbit phase, a seasonal correction for shadow length, and drift judged on effect size and significance together, so a single noisy pass can't trigger it.
+- `downlink_desk/battery.py` places every frame in the orbit's day/night cycle and integrates charge and discharge current around it; internal resistance comes from how voltage moves with current once the orbit pattern is removed.
 - `downlink_desk/spacewx.py` reads NOAA SWPC's public JSON products; `downlink_desk/summary.py` builds the morning summary (`python -m downlink_desk.fetch --summary` prints it).
 
 The first satellite is **GRBBeta** (NORAD 60237), a 2U CubeSat from the Technical University of Košice testing a gamma-ray detector. Track more from the **satellite picker** in the console header: it lists every satellite in orbit that SatNOGS can decode, with hand-written bios for a featured few (CroCube, Foresail-1p, CatSat, CubeBel-2, Sharjahsat-1, UWE-4). Satellites without a curated channels file get automatic channels: every numeric field the decoder produces, in raw units.
@@ -80,6 +85,7 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 
 - Data arrives minutes to hours after a pass, only when a volunteer station heard the satellite and uploaded it. "Live" means live from the moment the Pi stores it.
 - The health model needs about 25 samples per channel, and a few days of history, before it judges anything. Orbit positions for old frames use the current orbit data, so frames more than 45 days older than it are left out of the model.
+- The battery life figure is a model. GRBBeta's battery size and voltage scale are inferred from its platform builder's published power unit (20 Wh, about 8 V) and from the data itself, not confirmed by the team; correct them in `channels/grbbeta.json` if you know better.
 - The South Atlantic Anomaly outline is an approximate ellipse; the real edge depends on altitude.
 - Limits and some unit conversions (millivolts, kelvin) are inferred from decoder field names. Check them against the mission's documentation.
 - The audit trail is tamper-evident, not tamper-proof: someone with access to the Pi's files could rebuild the chain.
