@@ -58,6 +58,23 @@ On any device on the same network: `http://groundpi.local:8080`. The first fetch
 | Update Downlink Desk | `cd ~/downlink-desk && git pull && ./deploy/install.sh` |
 | Back up | copy `~/downlink-desk/data/downlink-desk.db` somewhere else |
 
+## Phone alerts (optional)
+
+1. Install the free **ntfy** app (Android or iOS).
+2. Subscribe to a topic name that only you know, e.g. `downlink-desk-7f3k9q`. Anyone who knows the name can read it, so make it hard to guess.
+3. On the Pi, edit `config.toml` and set `ntfy_topic = "downlink-desk-7f3k9q"` under `[notify]`. Optionally set `console_url = "http://groundpi.local:8080"` so tapping an alert opens the console.
+4. Nothing to restart; the next fetch uses it.
+
+You'll get a push for alarm-level limit breaks, restarts, a silent run of scheduled observations, and three failed fetches in a row. Each event is sent once.
+
+## After updating
+
+When an update changes units or adds orbit context, recalculate stored data once:
+
+```bash
+cd ~/downlink-desk && git pull && .venv/bin/python -m downlink_desk.fetch --rebuild && sudo systemctl restart downlink-desk-web
+```
+
 ## Reaching it from outside your home
 
 Don't open ports on your router. Install [Tailscale](https://tailscale.com) on the Pi and your phone/laptop instead (`curl -fsSL https://tailscale.com/install.sh | sh`, then `sudo tailscale up`), and use the Pi's Tailscale address. If teammates can reach it, set `write_passcode` in `config.toml`.
@@ -70,6 +87,7 @@ Don't open ports on your router. Install [Tailscale](https://tailscale.com) on t
 
 ## Troubleshooting
 
+- **Can't reach the Pi but it shows up in a network scan**: a VPN on your computer is probably blocking local traffic. Turn on its "allow LAN" option or disconnect it.
 - **"SatNOGS rejected the API key"**: you used a Network key, or pasted it with extra characters. Re-save it.
 - **No frames for hours**: normal if no volunteer station heard the satellite. Check its page on db.satnogs.org.
 - **Lots of "Unrecognised" frames**: often digipeated amateur traffic or noise. Expected.

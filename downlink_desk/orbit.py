@@ -102,3 +102,79 @@ def tle_epoch_ms(tle1):
     year = 2000 + yy if yy < 57 else 1900 + yy
     d = _dt.datetime(year, 1, 1, tzinfo=_dt.timezone.utc) + _dt.timedelta(days=doy - 1)
     return int(d.timestamp() * 1000)
+
+
+# ---------- sunlight, eclipse and ground track ----------
+
+def _jd(t_ms):
+    import datetime as _dt
+    d = _dt.datetime.fromtimestamp(t_ms / 1000, _dt.timezone.utc)
+    return jday(d.year, d.month, d.day, d.hour, d.minute, d.second + d.microsecond / 1e6)
+
+
+def sun_direction(jd):
+    """Unit vector to the Sun in an Earth-centred inertial frame (low-precision almanac formula,
+    good to about 0.01°, far better than the shadow model needs)."""
+    n = jd - 2451545.0
+    L = math.radians((280.460 + 0.9856474 * n) % 360)
+    g = math.radians((357.528 + 0.9856003 * n) % 360)
+    lam = L + math.radians(1.915) * math.sin(g) + math.radians(0.020) * math.sin(2 * g)
+    eps = math.radians(23.439 - 0.0000004 * n)
+    return (math.cos(lam), math.cos(eps) * math.sin(lam), math.sin(eps) * math.sin(lam))
+
+
+def state(sat, t_ms):
+    """Where the satellite is and whether it's in sunlight. Cylindrical Earth-shadow model."""
+    jd, fr = _jd(t_ms)
+    err, r, _ = sat.sgp4(jd, fr)
+    if err:
+        return None
+    s = sun_direction(jd + fr)
+    dot = r[0] * s[0] + r[1] * s[1] + r[2] * s[2]
+    px, py, pz = r[0] - dot * s[0], r[1] - dot * s[1], r[2] - dot * s[2]
+    sunlit = not (dot < 0 and math.sqrt(px * px + py * py + pz * pz) < WGS84_A)
+    th = gmst(jd + fr)
+    x = r[0] * math.cos(th) + r[1] * math.sin(th)
+    y = -r[0] * math.sin(th) + r[1] * math.cos(th)
+    lat = math.degrees(math.atan2(r[2], math.hypot(x, y)))
+    lon = (math.degrees(math.atan2(y, x)) + 540) % 360 - 180
+    alt = math.sqrt(r[0] ** 2 + r[1] ** 2 + r[2] ** 2) - WGS84_A
+    return {"sunlit": sunlit, "lat": round(lat, 2), "lon": round(lon, 2), "alt_km": round(alt, 1)}
+
+
+def eclipses(tle1, tle2, start_ms, end_ms, step_s=60):
+    """Eclipse intervals [[start_ms, end_ms], ...] between two times."""
+    sat = Satrec.twoline2rv(tle1, tle2)
+    out, cur = [], None
+    t = start_ms
+    while t <= end_ms:
+        st = state(sat, t)
+        if st is None:
+            break
+        if not st["sunlit"] and cur is None:
+            cur = [t, None]
+        elif st["sunlit"] and cur is not None:
+            cur[1] = t
+            out.append(cur)
+            cur = None
+        t += step_s * 1000
+    if cur is not None:
+        cur[1] = end_ms
+        out.append(cur)
+    return out
+
+
+def now_state(tle1, tle2, t_ms):
+    """Current position, sunlight, and when sunlight next changes (searches 2 h ahead)."""
+    sat = Satrec.twoline2rv(tle1, tle2)
+    st = state(sat, t_ms)
+    if st is None:
+        return None
+    t = t_ms
+    while t < t_ms + 2 * 3600_000:
+        t += 30_000
+        nx = state(sat, t)
+        if nx and nx["sunlit"] != st["sunlit"]:
+            st["next_change_ms"] = t
+            break
+    return st

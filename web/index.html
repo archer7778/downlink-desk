@@ -162,6 +162,7 @@ details.more summary{cursor:pointer;padding:8px 14px;border-top:1px solid var(--
 .chartbox svg{width:100%;height:auto;display:block;min-width:560px}
 .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--muted);padding:0 14px 10px}
 .legend i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;vertical-align:middle}
+.legend i.band{border-radius:2px;width:12px}
 
 .equip{width:100%}
 .equip td{padding:7px 14px;border-top:1px solid var(--line);vertical-align:middle}
@@ -253,6 +254,10 @@ textarea{width:100%;border:1px solid var(--line);border-radius:5px;background:va
           <div class="tlm"><table><thead><tr><th>Channel</th><th style="text-align:right">Value</th><th></th><th>Last 30 samples</th><th>Limits</th><th>Status</th><th style="text-align:right">Age</th></tr></thead><tbody id="tlmBody"></tbody></table></div>
         </div>
         <div class="panel">
+          <div class="ph"><h2>Expected vs received</h2><span class="sub" id="obsNote">SatNOGS stations scheduled to listen, and what each one delivered</span></div>
+          <div class="dt"><table style="min-width:600px"><thead><tr><th>When (UTC)</th><th>Station</th><th>Max el</th><th>Result</th></tr></thead><tbody id="obsBody"></tbody></table></div>
+        </div>
+        <div class="panel">
           <div class="ph"><h2>Frames received</h2><span class="sub">Last 72 hours · each dot is one frame from a volunteer station</span></div>
           <div class="chartbox" id="frameChart"></div>
           <div class="legend" id="frameLegend"></div>
@@ -285,7 +290,7 @@ textarea{width:100%;border:1px solid var(--line);border-radius:5px;background:va
   <section id="tab-frames" class="panel" hidden>
     <div class="ph"><h2>Frames from SatNOGS</h2><div class="row"><select class="txt" id="frameFilter" aria-label="Filter frames"><option value="">All frames</option></select><a class="btn" href="/api/export/telemetry.csv">Download telemetry CSV</a></div></div>
     <div class="pb"><p class="note">Raw frames uploaded by volunteer stations, decoded on this Pi with the community decoder. Select a row for every decoded field and the raw bytes. Unrecognised frames are ones the decoder couldn't parse, often digipeated traffic or noise.</p></div>
-    <div class="dt"><table><thead><tr><th>Time (UTC)</th><th>Heard by</th><th>Type</th><th>Key values</th></tr></thead><tbody id="frameBody"></tbody></table></div>
+    <div class="dt"><table><thead><tr><th>Time (UTC)</th><th>Heard by</th><th>Satellite</th><th>Type</th><th>Key values</th></tr></thead><tbody id="frameBody"></tbody></table></div>
     <div class="pb"><button class="btn" id="olderFrames">Load older frames</button></div>
   </section>
 
@@ -389,6 +394,7 @@ async function api(path,opts){
 const prefs=lsGet('downlinkdesk.live.prefs',{});
 let CS=prefs.cs||'',PASS=prefs.pass||'',SOUND=!!prefs.sound,tab=prefs.tab||'console';
 let CONF=null,CH=[],CHM={},SERIES={},FRAMES=[],FRAME_IDS=new Set(),LOG=[],HEALTH=null,PASSES=null,NOTES={text:''};
+let OBS=null,ECL=[],NOW=null,SUNLIT_AT=new Map();
 let CFG={limits:{},acks:{},shelves:{},checks:{},equip:{},duty:null},D=null,online=false,lastPointT=0;
 const savePrefs=()=>lsSet('downlinkdesk.live.prefs',{cs:CS,pass:PASS,sound:SOUND,tab});
 
@@ -448,6 +454,13 @@ function derive(now){
     const lim=3*CONF.poll_minutes*MIN,base=HEALTH.last_ok_ms||HEALTH.server_started_ms;
     if(HEALTH.token_present&&now-base>lim)alerts.push({id:'fetch@'+base,key:'fetch',sev:'crit',sev0:'crit',raised:base+lim,cleared:null,msg:HEALTH.last_ok_ms?`The Pi hasn't reached SatNOGS since ${fmtDT(HEALTH.last_ok_ms)}`:'The Pi has not completed a fetch from SatNOGS yet',first:''});
   }
+  // scheduled observations that delivered nothing, several in a row
+  if(OBS&&OBS.silent_streak&&OBS.silent_streak.length>=OBS.silent_after){
+    const ids=new Set(OBS.silent_streak),st=OBS.observations.filter(o=>ids.has(o.id));
+    const last=st[st.length-1],names=[...new Set(st.map(o=>o.station))].join(', ');
+    alerts.push({id:'silent@'+st[0].id,key:'silent',sev:'crit',sev0:'crit',raised:last.end+(CONF.alerts.upload_grace_hours||3)*HOUR,cleared:null,
+      msg:`${st.length} scheduled observations in a row produced no frames (${names}). The satellite may have gone quiet, or those stations had trouble`,first:''});
+  }
   const cut=CONF.commissioned_ms||0;
   const kept=alerts.filter(a=>a.raised>=cut||a.cleared==null);
   kept.forEach(a=>{if(!a.first)a.first=a.msg});
@@ -503,6 +516,11 @@ function renderTlm(now){
     tr.querySelector('[data-f=age]').textContent=s.at==null?'—':ago(now-s.at);}
 }
 function nextPass(now){return PASSES&&PASSES.passes?PASSES.passes.find(p=>p.los>now):null}
+function nextObsChip(now){
+  const o=OBS?OBS.observations.filter(x=>x.end>now).sort((a,b)=>a.start-b.start)[0]:null;
+  if(!o)return {cls:'',l:'Next expected data',v:'—',s:OBS?'No SatNOGS observations scheduled yet':'Loading schedule…'};
+  return {cls:o.start<=now?'ok':'',l:'Next expected data',v:o.start<=now?'Listening now':'T− '+dur(o.start-now),s:`${o.station} · max ${Math.round(o.max_alt)}° · ${fmtHM(o.start)}`};
+}
 function renderStrip(now,AV){
   const lf=FRAMES.length?FRAMES[FRAMES.length-1]:null,ld=[...FRAMES].reverse().find(f=>f[4]);
   let worst='ok';for(const c of CH){const l=latest(c.id);if(!l)continue;const s=limStatus(limitsAt(c.id,now).lim,l[1]);if(s==='crit')worst='crit';else if(s==='warn'&&worst==='ok')worst='warn'}
@@ -514,6 +532,7 @@ function renderStrip(now,AV){
     {cls:ld?worst:'',l:'Spacecraft',v:ld?{ok:'Nominal',warn:'Caution',crit:'Alarm'}[worst]:'—',s:'Against this console’s limits'},
     {cls:un.some(a=>a.sev==='crit')?'crit':un.length?'warn':'ok',l:'Alerts',v:`${AV.open.length} open`,s:un.length?`${un.length} need acknowledgement`:(AV.shelved.length?`${AV.shelved.length} shelved`:'All acknowledged')},
     {cls:fetchCls,l:'SatNOGS fetch',v:fetchOk?ago(now-HEALTH.last_ok_ms)+' ago':'Not yet',s:HEALTH?(HEALTH.fetching?'Fetching now…':`Every ${CONF.poll_minutes} min · ${HEALTH.frames_total} frames stored`):''},
+    nextObsChip(now),
     {cls:'',l:'Next pass over you',v:np?(np.aos<=now?'Up now':'T− '+dur(np.aos-now)):'—',s:np?`${fmtHM(np.aos)} · max ${np.max_el}°`:(PASSES&&PASSES.note)||''},
   ];
   $('#strip').innerHTML=chips.map(c=>`<div class="chip ${c.cls}"><span class="label">${c.l}</span><span class="v">${c.cls?'<span class="dot"></span>':''}${esc(c.v)}</span><span class="s">${esc(c.s)}</span></div>`).join('');
@@ -561,13 +580,14 @@ function renderFrameChart(now){
   const W=1000,H=150,L=8,R=8,T=10,B=26,ws=now-72*HOUR;const X=t=>L+(t-ws)/(now-ws)*(W-L-R);
   const types=[...new Set(FRAMES.filter(f=>f[1]>=ws).map(f=>f[3]))];const lane=(H-T-B)/Math.max(1,types.length);
   let g='';
+  for(const [a,b] of ECL){if(b<ws||a>now)continue;g+=`<rect x="${X(Math.max(a,ws)).toFixed(1)}" y="${T}" width="${Math.max(1,X(Math.min(b,now))-X(Math.max(a,ws))).toFixed(1)}" height="${H-T-B}" fill="var(--stale)" fill-opacity=".14"/>`}
   if(PASSES&&PASSES.passes)for(const p of PASSES.passes){if(p.los<ws||p.aos>now)continue;g+=`<rect x="${X(Math.max(p.aos,ws)).toFixed(1)}" y="${T}" width="${Math.max(2,X(Math.min(p.los,now))-X(Math.max(p.aos,ws))).toFixed(1)}" height="${H-T-B}" fill="var(--accent)" fill-opacity=".08"/>`}
   for(let h=Math.ceil(ws/(6*HOUR))*6*HOUR;h<now;h+=6*HOUR){const x=X(h);g+=`<line x1="${x}" x2="${x}" y1="${T}" y2="${H-B}" stroke="var(--line)"/><text x="${x}" y="${H-8}" text-anchor="middle" font-size="11" font-family="IBM Plex Mono,monospace" fill="var(--muted)">${new Date(h).getUTCHours()===0?fmtD(h).slice(5):fmtHM(h)}</text>`}
   types.forEach((ty,i)=>{const y=T+lane*i+lane/2;g+=`<text x="${L}" y="${(y-lane/2+11).toFixed(1)}" font-size="10" font-family="IBM Plex Sans Condensed,sans-serif" letter-spacing=".06em" fill="var(--muted)">${esc(ty.toUpperCase())}</text>`;
     for(const f of FRAMES){if(f[1]<ws||f[3]!==ty)continue;g+=`<circle cx="${X(f[1]).toFixed(1)}" cy="${(y+3).toFixed(1)}" r="3.2" fill="${typeColor(ty)}" fill-opacity=".85"><title>${esc(ty)} · ${fmtDT(f[1])} · ${esc(f[2])}</title></circle>`}});
   if(!types.length)g+=`<text x="${W/2}" y="${H/2}" text-anchor="middle" font-size="13" fill="var(--muted)">No frames in the last 72 hours yet</text>`;
   $('#frameChart').innerHTML=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Frames received over 72 hours">${g}</svg>`;
-  $('#frameLegend').innerHTML=types.map(t=>`<span><i style="background:${typeColor(t)}"></i>${esc(t)}</span>`).join('')+(PASSES&&PASSES.passes&&PASSES.passes.length?'<span><i style="background:var(--accent);opacity:.25;border-radius:2px"></i>Pass over your station</span>':'');
+  $('#frameLegend').innerHTML=types.map(t=>`<span><i style="background:${typeColor(t)}"></i>${esc(t)}</span>`).join('')+(ECL.length?'<span><i class="band" style="background:var(--stale);opacity:.35"></i>Satellite in eclipse</span>':'')+(PASSES&&PASSES.passes&&PASSES.passes.length?'<span><i class="band" style="background:var(--accent);opacity:.25"></i>Pass over your station</span>':'');
 }
 function mergedLog(now){return LOG.map(e=>({t:e.t,type:KIND_TYPE[e.kind]||'OPERATOR',by:e.cs,msg:e.msg,e})).concat(D.sys.filter(s=>s.t<=now).map(s=>({...s,by:'system'}))).sort((a,b)=>a.t-b.t)}
 let lastRecentSig='';
@@ -578,6 +598,7 @@ function renderLog(){const f=$('#logFilter').value,rows=mergedLog(Date.now()).fi
   $('#logBody').innerHTML=rows.map(r=>`<tr><td class="mono">${fmtDT(r.t)}</td><td><span class="tag ${r.type}">${r.type}</span></td><td class="mono">${esc(r.by)}</td><td class="msg">${esc(r.msg)}</td><td class="mono" ${r.e?`title="#${r.e.seq} ${esc(r.e.hash)}"`:''}>${r.e?'#'+r.e.seq+' '+esc(r.e.hash.slice(0,10)):'<span class="note">derived</span>'}</td></tr>`).join('')||'<tr><td colspan="5" class="empty">No entries match.</td></tr>'}
 function renderContext(now){
   const parts=[`<span>On duty: <b>${CFG.duty?esc(CFG.duty.cs):'nobody signed on'}</b>${CFG.duty?' since '+fmtDT(CFG.duty.t):''}</span>`];
+  if(NOW&&NOW.lat!=null){const ch=NOW.next_change_ms;parts.push(`<span>${esc(CONF.satellite.name)} now: <b>${Math.abs(NOW.lat).toFixed(1)}°${NOW.lat>=0?'N':'S'} ${Math.abs(NOW.lon).toFixed(1)}°${NOW.lon>=0?'E':'W'}</b>, ${Math.round(NOW.alt_km)} km up, <b>${NOW.sunlit?'in sunlight':'in eclipse'}</b>${ch&&ch>now?` · ${NOW.sunlit?'eclipse':'sunrise'} in ${Math.max(1,Math.round((ch-now)/MIN))} min`:''}</span>`)}
   if(HEALTH){const next=HEALTH.last_attempt_ms?HEALTH.last_attempt_ms+CONF.poll_minutes*MIN:null;parts.push(`<span>Last fetch ${HEALTH.last_attempt_ms?ago(now-HEALTH.last_attempt_ms)+' ago':'never'}${next&&next>now?` · next in about ${Math.ceil((next-now)/MIN)} min`:''}</span>`,`<button class="btn sm" id="fetchNow" ${HEALTH.fetching?'disabled':''}>${HEALTH.fetching?'Fetching…':'Fetch now'}</button>`)}
   $('#context').innerHTML=parts.join('');
   const lb=$('#livebar');lb.classList.toggle('down',!online);$('#liveText').textContent=online?`Live · ${CONF.satellite.name} via SatNOGS`:'Lost contact with the Pi · retrying';
@@ -585,6 +606,23 @@ function renderContext(now){
   if(HEALTH&&!HEALTH.token_present){sb.hidden=false;sb.className='banner crit';sb.innerHTML='<b>One step left:</b> put your SatNOGS DB API key in <code>secrets/satnogs_token</code> on the Pi, then press Fetch now. Get the key at db.satnogs.org → your avatar → Settings / API Token.'}
   else if(PASSES&&PASSES.note&&/latitude/.test(PASSES.note)){sb.hidden=false;sb.className='banner warn';sb.textContent='Set your station latitude and longitude in config.toml and restart the server to see passes over you.'}
   else sb.hidden=true;
+}
+
+/* ---------- expected vs received ---------- */
+const OBS_LABEL={scheduled:['','Scheduled'],in_progress:['ok','Listening now'],awaiting:['','Awaiting upload'],heard:['acc','Heard'],nothing:['warn','Nothing received']};
+let lastObsSig='';
+function renderObs(now){
+  if(!OBS){$('#obsBody').innerHTML='<tr><td colspan="4" class="empty">Loading the SatNOGS schedule…</td></tr>';return}
+  const all=OBS.observations;const future=all.filter(o=>o.end>now).sort((a,b)=>a.start-b.start).slice(0,4).reverse();
+  const past=all.filter(o=>o.end<=now).sort((a,b)=>b.end-a.end).slice(0,8);
+  const sig=JSON.stringify([future.map(o=>[o.id,o.status]),past.map(o=>[o.id,o.status,o.frames]),Math.floor(now/MIN)]);if(sig===lastObsSig)return;lastObsSig=sig;
+  const day=all.filter(o=>o.end<=now&&o.end>now-2*DAY&&o.status!=='awaiting'),ok=day.filter(o=>o.status==='heard').length;
+  $('#obsNote').textContent=day.length?`Last 48 h: ${ok} of ${day.length} finished observations delivered frames (${Math.round(ok/day.length*100)}%)`:'SatNOGS stations scheduled to listen, and what each delivered';
+  const silent=new Set(OBS.silent_streak||[]);
+  const row=o=>{const [cls,lab]=OBS_LABEL[o.status]||['',o.status];const when=o.status==='scheduled'?`in ${dur(o.start-now)}`:'';
+    const res=o.status==='heard'?`${o.frames} frame${o.frames>1?'s':''}, ${o.decoded} decoded`:o.status==='awaiting'?'stations upload after the pass':o.status==='nothing'?(silent.has(o.id)?'part of a silent run':''):when;
+    return `<tr class="${o.end>now?'upcoming':''}"><td class="mono">${fmtDT(o.start)}–${fmtHM(o.end)}</td><td>${esc(o.station||'—')}</td><td class="mono">${o.max_alt!=null?Math.round(o.max_alt)+'°':'—'}</td><td><span class="pill ${cls}">${lab}</span> <span class="note">${esc(res)}</span></td></tr>`};
+  $('#obsBody').innerHTML=(future.map(row).join('')+past.map(row).join(''))||'<tr><td colspan="4" class="empty">No observations of this satellite are scheduled on SatNOGS right now. Frames still arrive whenever a station happens to record it.</td></tr>';
 }
 
 /* ---------- frames tab ---------- */
@@ -599,8 +637,8 @@ function renderFrames(){
   const types=[...new Set(frameRows.map(f=>f.type))],sel=$('#frameFilter'),cur=sel.value;
   sel.innerHTML='<option value="">All frames</option>'+types.map(t=>`<option${t===cur?' selected':''}>${esc(t)}</option>`).join('');
   const rows=frameRows.filter(f=>!cur||f.type===cur);
-  $('#frameBody').innerHTML=rows.map(f=>`<tr class="fr" data-frame="${f.id}"><td class="mono">${fmtDT(f.t)}</td><td>${esc(f.observer||'—')}</td><td><span class="pill ${f.ok?'acc':''}">${esc(f.type)}</span></td><td class="mono" style="white-space:normal">${keyVals(f).map(k=>`${esc(k.c.name)} <b>${esc(k.v)}</b>`).join(' · ')||'<span class="note">—</span>'}</td></tr>`+
-    (openFrame===f.id?`<tr><td colspan="4"><div class="fields">${Object.entries(f.fields).map(([k,v])=>`<div><span>${esc(k)}</span> ${esc(v)}</div>`).join('')||'<div><span>No decoded fields</span></div>'}</div><div class="hex">${esc(f.hex)}</div></td></tr>`:'')).join('')||'<tr><td colspan="4" class="empty">No frames stored yet.</td></tr>';
+  $('#frameBody').innerHTML=rows.map(f=>`<tr class="fr" data-frame="${f.id}"><td class="mono">${fmtDT(f.t)}</td><td>${esc(f.observer||'—')}</td><td class="mono" style="white-space:nowrap">${f.sunlit==null?'—':(f.sunlit?'Sunlit':'Eclipse')}${f.sub_lat!=null?` · ${f.sub_lat.toFixed(0)}°, ${f.sub_lon.toFixed(0)}°`:''}</td><td><span class="pill ${f.ok?'acc':''}">${esc(f.type)}</span></td><td class="mono" style="white-space:normal">${keyVals(f).map(k=>`${esc(k.c.name)} <b>${esc(k.v)}</b>`).join(' · ')||'<span class="note">—</span>'}</td></tr>`+
+    (openFrame===f.id?`<tr><td colspan="5"><div class="fields">${Object.entries(f.fields).map(([k,v])=>`<div><span>${esc(k)}</span> ${esc(v)}</div>`).join('')||'<div><span>No decoded fields</span></div>'}</div><div class="hex">${esc(f.hex)}</div></td></tr>`:'')).join('')||'<tr><td colspan="5" class="empty">No frames stored yet.</td></tr>';
 }
 
 /* ---------- passes tab ---------- */
@@ -624,11 +662,12 @@ function chartSVG(c,now){
   const W=740,H=250,L0=52,R0=10,T0=12,B0=26,ws=now-7*DAY,X=t=>L0+(t-ws)/(now-ws)*(W-L0-R0),Y=v=>T0+(hi-v)/(hi-lo)*(H-T0-B0);let g='';
   if(L){const [rl,yl,yh,rh]=L;const band=(a,b,col)=>{a=Math.max(a,lo);b=Math.min(b,hi);if(b>a)g+=`<rect x="${L0}" y="${Y(b).toFixed(1)}" width="${W-L0-R0}" height="${(Y(a)-Y(b)).toFixed(1)}" fill="${col}" fill-opacity=".12"/>`};
     if(rh!=null)band(rh,hi,'var(--crit)');if(yh!=null)band(yh,rh??hi,'var(--warn)');if(rl!=null)band(lo,rl,'var(--crit)');if(yl!=null)band(rl??lo,yl,'var(--warn)')}
+  for(const [a,b] of ECL){if(b<ws||a>now)continue;g+=`<rect x="${X(Math.max(a,ws)).toFixed(1)}" y="${T0}" width="${Math.max(1,X(Math.min(b,now))-X(Math.max(a,ws))).toFixed(1)}" height="${H-T0-B0}" fill="var(--stale)" fill-opacity=".13"/>`}
   for(let i=0;i<=4;i++){const v=lo+(hi-lo)*i/4,y=Y(v);g+=`<line x1="${L0}" x2="${W-R0}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" stroke="var(--line)"/><text x="${L0-6}" y="${(y+3.5).toFixed(1)}" text-anchor="end" font-size="10.5" font-family="IBM Plex Mono,monospace" fill="var(--muted)">${v.toFixed(Math.min(c.dp,2))}</text>`}
   for(let d=Math.ceil(ws/DAY)*DAY;d<now;d+=DAY){const x=X(d);g+=`<line x1="${x}" x2="${x}" y1="${T0}" y2="${H-B0}" stroke="var(--line)" stroke-dasharray="2 3"/><text x="${x}" y="${H-8}" text-anchor="middle" font-size="10.5" font-family="IBM Plex Mono,monospace" fill="var(--muted)">${fmtD(d).slice(5)}</text>`}
   let run=[];const flush=()=>{if(run.length>1)g+=`<polyline points="${run.join(' ')}" fill="none" stroke="var(--accent)" stroke-width="1.5"/>`;run=[]};let prev=null;
   for(const [t,v] of ser){if(prev!=null&&t-prev>45*MIN)flush();run.push(X(t).toFixed(1)+','+Y(v).toFixed(1));prev=t}flush();
-  ser.forEach(([t,v])=>{g+=`<circle cx="${X(t).toFixed(1)}" cy="${Y(v).toFixed(1)}" r="2.4" fill="var(--accent)"><title>${fmtDT(t)} · ${fv(c,v)}</title></circle>`});
+  ser.forEach(([t,v])=>{const sl=SUNLIT_AT.get(t);g+=`<circle cx="${X(t).toFixed(1)}" cy="${Y(v).toFixed(1)}" r="2.4" fill="${sl===0?'var(--ink)':'var(--accent)'}"><title>${fmtDT(t)} · ${fv(c,v)}${sl==null?'':sl?' · in sunlight':' · in eclipse'}</title></circle>`});
   return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(c.name)} over 7 days">${g}</svg>`;
 }
 function renderDrawer(full){
@@ -636,12 +675,13 @@ function renderDrawer(full){
   if(full){
     $('#drawer').innerHTML=`<div class="dr-head"><div class="stack" style="gap:4px"><span class="label">${esc(c.sub)} · ${esc((c.fields||[c.field]).join(', '))}</span><h3 id="drTitle">${esc(c.name)}</h3></div><button class="btn" id="drClose">Close</button></div>
      <div class="dr-now" id="drNow"></div>
-     <div class="stack" style="gap:6px"><span class="label">Last 7 days · shaded bands are caution and alarm zones</span><div class="chartbox" style="padding:0" id="drChart"></div></div>
+     <div class="stack" style="gap:6px"><span class="label">Last 7 days · coloured bands are caution and alarm zones, grey bands are eclipse, dark dots were taken in eclipse</span><div class="chartbox" style="padding:0" id="drChart"></div></div>
      <div class="stats" id="drStats"></div>
      <div class="panel"><div class="ph"><h2>Limits</h2><span class="sub" id="drLimBy"></span></div><form class="pb stack" id="limForm">
        <div class="limform">${['Alarm low','Caution low','Caution high','Alarm high'].map((n,i)=>`<label><span class="label">${n}</span><input id="lim${i}" inputmode="decimal" placeholder="none" value="${L.lim&&L.lim[i]!=null?L.lim[i]:''}"></label>`).join('')}</div>
        <input class="txt" id="limReason" maxlength="160" placeholder="Reason for the change (required)">
-       <div class="row"><button class="btn primary" type="submit">Save limits</button><span class="note">Default: ${limTxt(c.lim)} ${esc(c.unit)}. Changes apply from now on and are signed in the log.</span></div>
+       <div class="row"><button class="btn primary" type="submit">Save limits</button><button class="btn" type="button" id="learnLim" ${c.counter?'disabled title="Counters don\'t have limits"':''}>Suggest from data</button><span class="note">Default: ${limTxt(c.lim)} ${esc(c.unit)}. Changes apply from now on and are signed in the log.</span></div>
+       <p class="note" id="learnNote"></p>
      </form></div>
      <div class="panel"><div class="ph"><h2>Alerts on this channel</h2></div><div class="alerts" id="drAlerts"></div></div>`;
   }
@@ -651,6 +691,15 @@ function renderDrawer(full){
   $('#drLimBy').textContent=L.by?`Last changed by ${L.by.cs}, ${fmtDT(L.by.t)}`:'Using defaults from the channels file';
   const rel=D.alerts.filter(a=>a.ch===c.id).slice(-6).reverse();
   $('#drAlerts').innerHTML=rel.length?rel.map(a=>`<div class="alert"><span class="pill ${a.event?'acc':a.sev}">${a.event?'Event':a.sev==='crit'?'Alarm':'Caution'}</span><span class="msg">${esc(a.msg)}</span><span></span><span class="meta">Raised ${fmtDT(a.raised)}${a.event?'':a.cleared?' · cleared '+fmtDT(a.cleared):' · active'}</span></div>`).join(''):'<div class="empty">No alerts on this channel since the console was commissioned.</div>';
+}
+
+function learnLimits(c){
+  const v=(SERIES[c.id]||[]).filter(p=>p[0]>=Date.now()-14*DAY).map(p=>p[1]).sort((a,b)=>a-b);
+  if(v.length<20)return {err:`Only ${v.length} samples so far; at least 20 are needed. Check back after a few more passes.`};
+  const q=f=>v[Math.min(v.length-1,Math.max(0,Math.round(f*(v.length-1))))];
+  const lo=q(.02),hi=q(.98),step=Math.pow(10,-c.dp),m=Math.max((hi-lo)*.5,step*5);
+  const r=x=>+(Math.round(x/step)*step).toFixed(c.dp);
+  return {lim:[r(lo-2*m),r(lo-m),r(hi+m),r(hi+2*m)],n:v.length,lo,hi};
 }
 
 /* ---------- handover ---------- */
@@ -664,6 +713,8 @@ function handoverText(now,AV){
   P('');P('DATA');
   P(`  Latest decoded frame ${ld?fmtDT(ld[1])+' ('+ago(now-ld[1])+' ago) from '+(ld[2]||'unknown'):'none'}`);
   P(`  This shift: ${inShift.length} frames (${inShift.filter(f=>f[4]).length} decoded) from ${new Set(inShift.map(f=>f[2])).size} station(s)`);
+  if(OBS){const sh=OBS.observations.filter(o=>o.end>start&&o.end<=now&&o.status!=='awaiting');P(`  Scheduled SatNOGS observations this shift: ${sh.filter(o=>o.status==='heard').length} of ${sh.length} delivered frames`);
+    const nx=OBS.observations.filter(o=>o.end>now).sort((a,b)=>a.start-b.start)[0];if(nx)P(`  Next expected data: ${fmtDT(nx.start)} from ${nx.station} (max ${Math.round(nx.max_alt)}°)`)}
   if(HEALTH)P(`  Fetcher: last success ${HEALTH.last_ok_ms?fmtDT(HEALTH.last_ok_ms):'never'}${HEALTH.fetches[0]&&!HEALTH.fetches[0].ok?' · last attempt failed: '+HEALTH.fetches[0].message:''}`);
   P('');P('SPACECRAFT (latest values)');
   CH.forEach(c=>{const s=chState(c,now);if(s.v!=null)P(`  ${c.name.padEnd(34)} ${(+s.v).toFixed(c.dp)} ${c.unit}  (${ago(now-s.at)} old)${s.st!=='ok'?'  ['+ST_LABEL[s.st].toUpperCase()+']':''}`)});
@@ -686,7 +737,7 @@ function renderAbout(){
   $('#satCredit').innerHTML=sat.website?`${esc(s.name)} is operated by its own team; see <a href="${esc(sat.website)}" target="_blank" rel="noopener">${esc(sat.website)}</a>.`:'';
   $('#specNote').textContent=CONF.spec.notes||'';
   $('#specBody').innerHTML=CH.map(c=>`<tr><td>${esc(c.name)}</td><td class="mono">${esc((c.fields||[c.field]).join(', '))}</td><td class="mono">${esc(c.transform||'none')}</td><td class="mono">${esc(c.unit)}</td><td class="mono">${limTxt(c.lim)}</td></tr>`).join('');
-  $('#sysKv').innerHTML=[['Satellite',`${s.name} · NORAD ${s.norad} · decoder ${s.decoder}`],['SatNOGS status',sat.status||'—'],['Station',`${CONF.station.name} (${CONF.station.lat}, ${CONF.station.lon})`],['Fetch interval',CONF.poll_minutes+' min'],['Downlink Desk',CONF.version],['Commissioned',CONF.commissioned_ms?fmtDT(CONF.commissioned_ms):'—']].map(([k,v])=>`<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('');
+  $('#sysKv').innerHTML=[['Satellite',`${s.name} · NORAD ${s.norad} · decoder ${s.decoder}`],['SatNOGS status',sat.status||'—'],['Station',`${CONF.station.name} (${CONF.station.lat}, ${CONF.station.lon})`],['Fetch interval',CONF.poll_minutes+' min'],['Phone alerts',CONF.phone_alerts?'On (ntfy)':'Off. Set ntfy_topic in config.toml to get alarms on your phone'],['Downlink Desk',CONF.version],['Commissioned',CONF.commissioned_ms?fmtDT(CONF.commissioned_ms):'—']].map(([k,v])=>`<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('');
 }
 
 /* ---------- sound ---------- */
@@ -699,7 +750,7 @@ let AV_cache={open:[],shelved:[],closed:[]};
 function refresh(force){
   if(!CONF)return;const now=Date.now();D=derive(now);const AV=alertView(now);AV_cache=AV;
   $('#utc').textContent=fmtT(now);$('#date').textContent=fmtD(now);
-  renderStrip(now,AV);renderTlm(now);renderAlerts(AV);renderProc(now);renderEquip(now);renderRecent(now);renderContext(now);soundCheck(AV);
+  renderStrip(now,AV);renderTlm(now);renderObs(now);renderAlerts(AV);renderProc(now);renderEquip(now);renderRecent(now);renderContext(now);soundCheck(AV);
   if(force||tick%4===0)renderFrameChart(now);
   if(tab==='passes')renderPasses(now);
   if(drawerCh)renderDrawer(false);
@@ -709,7 +760,7 @@ let tick=0;
 /* ---------- data loading ---------- */
 function addTelemetry(j){
   for(const [t,ch,v] of j.points){const s=SERIES[ch]||(SERIES[ch]=[]);if(!s.length||t>s[s.length-1][0])s.push([t,v]);else if(!s.some(p=>p[0]===t)){s.push([t,v]);s.sort((a,b)=>a[0]-b[0])}lastPointT=Math.max(lastPointT,t)}
-  for(const f of j.frames){if(!FRAME_IDS.has(f[0])){FRAME_IDS.add(f[0]);FRAMES.push(f)}}
+  for(const f of j.frames){if(!FRAME_IDS.has(f[0])){FRAME_IDS.add(f[0]);FRAMES.push(f);if(f[5]!=null)SUNLIT_AT.set(f[1],f[5])}}
   FRAMES.sort((a,b)=>a[1]-b[1]);
 }
 async function poll(kind){
@@ -718,6 +769,9 @@ async function poll(kind){
     if(kind==='log'){const after=LOG.length?LOG[LOG.length-1].seq:0;const add=await api('/api/log?after='+after);if(add.length){LOG.push(...add);buildCfg()}}
     if(kind==='health')HEALTH=await api('/api/health');
     if(kind==='passes')PASSES=await api('/api/passes?hours=36');
+    if(kind==='obs')OBS=await api('/api/observations?days=3');
+    if(kind==='now')NOW=await api('/api/now');
+    if(kind==='ecl'){const n=Date.now();ECL=(await api(`/api/eclipses?since=${n-7*DAY}&until=${n}`)).eclipses||[]}
     if(kind==='notes'&&document.activeElement!==$('#hoNotes')){NOTES=await api('/api/notes');if($('#hoNotes').value!==NOTES.text)$('#hoNotes').value=NOTES.text}
     online=true;
   }catch(e){if(!e.status)online=false}
@@ -728,11 +782,12 @@ async function boot(){
   $('#sub').textContent=`${CONF.satellite.name} · NORAD ${CONF.satellite.norad} · live data from the SatNOGS network`;
   $('#passFld').hidden=!CONF.write_protected;
   buildTlm();
-  await Promise.all(['tel','log','health','passes','notes'].map(poll));
+  await Promise.all(['tel','log','health','passes','notes','obs','now','ecl'].map(poll));
   renderAbout();refresh(true);if(tab!=='console')showTab(tab);
   setInterval(()=>{tick++;refresh(false)},1000);
   setInterval(()=>poll('tel'),60000);setInterval(()=>poll('log'),10000);setInterval(()=>poll('health'),20000);
   setInterval(()=>poll('passes'),600000);setInterval(()=>poll('notes'),15000);
+  setInterval(()=>poll('obs'),120000);setInterval(()=>poll('now'),30000);setInterval(()=>poll('ecl'),1800000);
 }
 
 /* ---------- events ---------- */
@@ -753,6 +808,9 @@ document.addEventListener('click',async e=>{
   if((el=T.closest('[data-step]'))&&!el.disabled)act('check',{day:el.dataset.day,step:el.dataset.step},`Daily check ${el.dataset.day}: ${PROC.find(p=>p[0]===el.dataset.step)[1]}.`);
   if(T.closest('[data-eqcancel]')){eqPending=null;$('#equip').dataset.sig='';refresh()}
   if(T.closest('#fetchNow')){try{const r=await api('/api/fetch',{method:'POST',body:{}});toast(r.message);setTimeout(()=>poll('health'),1500);setTimeout(()=>{poll('tel');poll('health')},25000)}catch(err){toast(err.body&&err.body.message?err.body.message:'Could not start a fetch: '+err.message)}}
+  if(T.closest('#learnLim')){const c=CHM[drawerCh],r=learnLimits(c);if(r.err){$('#learnNote').textContent=r.err;return}
+    r.lim.forEach((v,i)=>$('#lim'+i).value=v);$('#limReason').value=`Learned from ${r.n} samples over 14 days (typical ${r.lo.toFixed(c.dp)}–${r.hi.toFixed(c.dp)} ${c.unit})`;
+    $('#learnNote').textContent='Suggested from the satellite’s own recent history: caution sits half the normal range outside it, alarm a full range outside it. Review, then Save to sign it into the log.'}
   if(T.closest('#drClose')||T===$('#scrim'))closeDrawer();
 });
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&drawerCh){closeDrawer();return}

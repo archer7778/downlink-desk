@@ -46,6 +46,19 @@ CREATE TABLE IF NOT EXISTS fetches (
   frames_new INTEGER NOT NULL DEFAULT 0,
   message TEXT
 );
+CREATE TABLE IF NOT EXISTS observations (
+  id INTEGER PRIMARY KEY,
+  start_ms INTEGER NOT NULL,
+  end_ms INTEGER NOT NULL,
+  station_id INTEGER,
+  station_name TEXT,
+  lat REAL,
+  lng REAL,
+  max_alt REAL,
+  mode TEXT,
+  fetched_ms INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS observations_end ON observations (end_ms);
 CREATE TABLE IF NOT EXISTS meta (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -64,6 +77,11 @@ def connect(path):
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.executescript(SCHEMA)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(frames)")}
+    for col, typ in (("sunlit", "INTEGER"), ("sub_lat", "REAL"), ("sub_lon", "REAL")):
+        if col not in cols:
+            conn.execute(f"ALTER TABLE frames ADD COLUMN {col} {typ}")
+    conn.commit()
     return conn
 
 

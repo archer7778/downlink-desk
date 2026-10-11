@@ -7,12 +7,14 @@ from pathlib import Path
 DEFAULTS = {
     "satellite": {"norad": 60237, "name": "GRBBeta", "decoder": "grbbeta",
                   "channels": "channels/grbbeta.json"},
-    "satnogs": {"api": "https://db.satnogs.org/api", "token_file": "secrets/satnogs_token",
+    "satnogs": {"api": "https://db.satnogs.org/api", "network_api": "https://network.satnogs.org/api",
+                "token_file": "secrets/satnogs_token",
                 "poll_minutes": 30, "max_pages": 3, "backfill_pages": 6},
     "station": {"name": "Home", "lat": 0.0, "lon": 0.0, "alt_m": 0.0, "min_elevation": 10.0},
     "server": {"host": "0.0.0.0", "port": 8080, "write_passcode": ""},
     "storage": {"db": "data/downlink-desk.db"},
-    "alerts": {"stale_hours": 12},
+    "alerts": {"stale_hours": 12, "upload_grace_hours": 3, "silent_after": 3, "min_obs_elevation": 15},
+    "notify": {"ntfy_topic": "", "ntfy_server": "https://ntfy.sh", "console_url": ""},
 }
 
 

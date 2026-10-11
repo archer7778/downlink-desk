@@ -5,7 +5,11 @@
 Downlink Desk pulls real telemetry for a satellite from the [SatNOGS](https://satnogs.org) volunteer ground-station network, decodes it on the Pi, and gives a small team an operations console around it:
 
 - **Health telemetry** checked against caution and alarm limits, with seven-day history per channel
-- **Missing-data alerts** when frames stop arriving, and **fetch-health alerts** when the Pi can't reach SatNOGS
+- **Expected vs received:** reads the public SatNOGS Network schedule, so it knows which stations will listen and when, scores every observation as heard or empty, and shows when the next data should arrive
+- **Silent-satellite alarm** when several scheduled observations in a row deliver nothing, plus a backstop alert when frames simply stop, and **fetch-health alerts** when the Pi can't reach SatNOGS
+- **Orbit context:** every frame is tagged sunlit or eclipse with the satellite's position, charts shade eclipses, and the console shows where the satellite is right now
+- **Learned limits:** one click proposes caution and alarm limits from the satellite's own history, for the operator to review and sign
+- **Phone alerts** through the free ntfy app: alarms, restarts, silence and fetch failures
 - **Restart detection** from the spacecraft's own boot counters
 - **Acknowledge and shelve** alerts, with a reason, under your call sign
 - **A signed audit trail**: every operator action is hash-chained on the Pi, so edits or deletions show up on verify
@@ -29,7 +33,9 @@ volunteer SatNOGS stations ──► SatNOGS DB ──► Pi: fetch job (every 3
 - `downlink_desk/fetch.py` asks the SatNOGS DB API for new frames, politely: at least 11 s between requests, honours `Retry-After`, holds satellites flagged as frequency violators to one request a day.
 - Frames are decoded locally with the community [satnogs-decoders](https://pypi.org/project/satnogs-decoders/) package and mapped to channels by a small JSON file.
 - `downlink_desk/server.py` is a standard-library web server that serves the console and a JSON API, and signs audit-log entries.
-- Alerts are worked out in the browser from the stored telemetry, so every viewer sees the same thing.
+- Scheduled observations come from the public SatNOGS Network API every 3 hours, one request.
+- Sunlight and position come from the latest orbit data (SGP4 plus a cylindrical Earth-shadow model).
+- Alerts are worked out in the browser from the stored telemetry, so every viewer sees the same thing. Phone alerts are checked by the fetch job on the Pi.
 
 The default satellite is **GRBBeta** (NORAD 60237), a 1U CubeSat from the Technical University of Košice carrying a gamma-ray burst detector. Point it at another satellite by changing `[satellite]` in `config.toml` and writing a channels file for its decoder.
 

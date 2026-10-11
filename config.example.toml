@@ -9,6 +9,7 @@ channels = "channels/grbbeta.json"  # which decoded fields to show, with units a
 
 [satnogs]
 api = "https://db.satnogs.org/api"
+network_api = "https://network.satnogs.org/api"   # public schedule of which stations will listen, and when
 token_file = "secrets/satnogs_token"  # your SatNOGS DB API key (db.satnogs.org > avatar > Settings/API Token)
 poll_minutes = 30                   # please keep this at 20 or more; SatNOGS is volunteer-run
 max_pages = 3                       # pages per fetch once caught up
@@ -32,3 +33,13 @@ db = "data/downlink-desk.db"
 
 [alerts]
 stale_hours = 12                    # caution when no new frames arrive for this long (alarm at twice this)
+upload_grace_hours = 3              # how long after a scheduled observation to wait for its frames
+silent_after = 3                    # alarm when this many scheduled observations in a row deliver nothing
+min_obs_elevation = 15              # ignore very low passes when judging silence (degrees)
+
+[notify]
+# Phone alerts via ntfy: install the free ntfy app, subscribe to a topic name only you know
+# (e.g. "downlink-desk-7f3k9q"), and put the same name here. Leave blank to turn alerts off.
+ntfy_topic = ""
+ntfy_server = "https://ntfy.sh"
+console_url = ""                    # optional: link opened when you tap an alert, e.g. http://groundpi.local:8080
