@@ -1,34 +1,47 @@
 # Downlink Desk
 
-**A lightweight mission-operations console for small satellite teams. Runs on a $15 Raspberry Pi Zero 2 W.**
+**A mission-control console for a real satellite, running on a $15 Raspberry Pi Zero 2 W.**
 
-Downlink Desk pulls real telemetry for a satellite from the [SatNOGS](https://satnogs.org) volunteer ground-station network, decodes it on the Pi, and gives a small team an operations console around it:
+Downlink Desk watches real CubeSats in orbit. It pulls their telemetry from the [SatNOGS](https://satnogs.org) volunteer ground-station network, decodes it on the Pi, learns what normal looks like for each spacecraft, and runs a small operations console around it: alarms, a live feed, phone alerts, space weather and a signed audit trail. It uses almost none of the Pi: load average 0.00, about 150 MB of RAM, 1.4 MB of data for the first 200 frames.
 
-- **Health telemetry** checked against caution and alarm limits, with seven-day history per channel
-- **Expected vs received:** reads the public SatNOGS Network schedule, so it knows which stations will listen and when, scores every observation as heard or empty, and shows when the next data should arrive
-- **Silent-satellite alarm** when several scheduled observations in a row deliver nothing, plus a backstop alert when frames simply stop, and **fetch-health alerts** when the Pi can't reach SatNOGS
-- **Orbit context:** every frame is tagged sunlit or eclipse with the satellite's position, charts shade eclipses, and the console shows where the satellite is right now
-- **Learned limits:** one click proposes caution and alarm limits from the satellite's own history, for the operator to review and sign
-- **Phone alerts** through the free ntfy app: alarms, restarts, silence and fetch failures
-- **Several satellites at once:** a picker in the header switches between tracked satellites, each with its own history, alerts, limits and schedule; a catalog browser with bios adds more
-- **Restart detection** from the spacecraft's own boot counters
-- **Acknowledge and shelve** alerts, with a reason, under your call sign
-- **A signed audit trail**: every operator action is hash-chained on the Pi, so edits or deletions show up on verify
-- **Daily check, shift handover report, equipment status, pass predictions** over your own location
-- **A training simulator** with fault injection for practice and demos
+![Downlink Desk console showing live GRBBeta telemetry from SatNOGS, running on a Raspberry Pi Zero 2 W](docs/screenshot.png)
+*Live data: GRBBeta, a 2U CubeSat from Slovakia, as seen by a Pi Zero 2 W in Da Nang.*
+
+## What it does
+
+**Knows what normal looks like**
+- **Learned thermal and power model.** A small satellite warms in sunlight and cools in Earth's shadow every 95 minutes. For each channel the Pi learns the typical value at each point of that cycle, corrects for the shadow growing and shrinking through the seasons, and compares the last two days with the three weeks before. A battery running 3 °C warmer than it used to at the same point in the orbit is still far inside its limits; this catches it anyway.
+- **Orbit profile charts:** each channel plotted against minutes since sunrise, with the learned curve, its normal spread, and the latest readings on top.
+- **Drift and oddity alerts** when a channel moves away from its own history, separate from the fixed limits.
+
+**Watches the satellite and the network**
+- **Live feed:** frames appear in every open console the moment the Pi stores them (server-sent events).
+- **Expected vs received:** reads the SatNOGS Network schedule, so it knows which stations will listen and when, scores every observation as heard or empty, and counts down to the next data.
+- **Silent-satellite alarm** when several scheduled observations in a row hear nothing, and fetch-health alerts when the Pi can't reach SatNOGS.
+- **Limits and restarts:** caution and alarm limits per channel (or learned from the data in one click), and restart detection from the spacecraft's boot counters.
+
+**Puts it in context**
+- **Space weather from NOAA:** geomagnetic storms (Kp and the G1–G5 scale), solar flares from GOES X-ray data, and solar flux, marked on every channel's chart so you can see whether that odd reading lined up with a storm.
+- **Where it is right now:** position, height, sunlight or shadow, and when the next sunrise is. Every frame is tagged with its orbit position, and the **South Atlantic Anomaly**, the radiation hot spot where spacecraft see the most particle hits, is flagged.
+- **Passes over your own location**, worked out on the Pi with SGP4.
+
+**Runs like a real operations desk**
+- **Morning summary on your phone** through the free ntfy app: last night's frames, stations, restarts, drifts, storms and the day's best pass. Alarms, restarts and silence are pushed as they happen.
+- **A signed audit trail:** every acknowledgement, shelve, limit change and handover is hash-chained on the Pi, so an edit or deletion shows up on verify.
+- **Shift handover report, daily check, equipment status,** and a **training simulator** with fault injection.
+- **Several satellites at once:** a picker with bios for featured CubeSats, and a catalog of every satellite in orbit that SatNOGS can decode.
 
 > ⚠️ **Not flight software.** Downlink Desk is not affiliated with any satellite team, cannot command a spacecraft, and ships with provisional limits chosen for this console rather than the mission's own. Don't use it to make decisions about real hardware.
 
-![Downlink Desk console showing live GRBBeta telemetry from SatNOGS, running on a Raspberry Pi Zero 2 W](docs/screenshot.png)
-*Screenshot from the test suite, using synthetic frames in GRBBeta's format.*
-
-**Try the training simulator in your browser:** enable GitHub Pages for the `docs/` folder and it's served at `https://archer7778.github.io/downlink-desk/`.
+**Try the training simulator in your browser:** <https://archer7778.github.io/downlink-desk/> (once GitHub Pages is switched on for the `docs/` folder).
 
 ## How it works
 
 ```
 volunteer SatNOGS stations ──► SatNOGS DB ──► Pi: fetch job (every 30 min) ──► SQLite ──► web console
-                                              decodes with satnogs-decoders              on your network
+                                              decodes with satnogs-decoders     │        on your network
+NOAA space weather (every 3 h) ───────────────────────────────────────────────►┘        live feed (SSE)
+                                              orbit phase + learned model ──► ntfy ──► your phone
 ```
 
 - `downlink_desk/fetch.py` asks the SatNOGS DB API for new frames, politely: at least 11 s between requests, honours `Retry-After`, holds satellites flagged as frequency violators to one request a day.
@@ -37,6 +50,8 @@ volunteer SatNOGS stations ──► SatNOGS DB ──► Pi: fetch job (every 3
 - Scheduled observations come from the public SatNOGS Network API every 3 hours, one request.
 - Sunlight and position come from the latest orbit data (SGP4 plus a cylindrical Earth-shadow model).
 - Alerts are worked out in the browser from the stored telemetry, so every viewer sees the same thing. Phone alerts are checked by the fetch job on the Pi.
+- `downlink_desk/baseline.py` is the learned model: robust medians in 5-minute bins of orbit phase, a seasonal correction for shadow length, and drift judged on effect size and significance together, so a single noisy pass can't trigger it.
+- `downlink_desk/spacewx.py` reads NOAA SWPC's public JSON products; `downlink_desk/summary.py` builds the morning summary (`python -m downlink_desk.fetch --summary` prints it).
 
 The first satellite is **GRBBeta** (NORAD 60237), a 2U CubeSat from the Technical University of Košice testing a gamma-ray detector. Track more from the **satellite picker** in the console header: it lists every satellite in orbit that SatNOGS can decode, with hand-written bios for a featured few (CroCube, Foresail-1p, CatSat, CubeBel-2, Sharjahsat-1, UWE-4). Satellites without a curated channels file get automatic channels: every numeric field the decoder produces, in raw units.
 
@@ -63,7 +78,9 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 
 ## Limitations
 
-- Data arrives minutes to hours after a pass, only when a volunteer station heard the satellite and uploaded it.
+- Data arrives minutes to hours after a pass, only when a volunteer station heard the satellite and uploaded it. "Live" means live from the moment the Pi stores it.
+- The health model needs about 25 samples per channel, and a few days of history, before it judges anything. Orbit positions for old frames use the current orbit data, so frames more than 45 days older than it are left out of the model.
+- The South Atlantic Anomaly outline is an approximate ellipse; the real edge depends on altitude.
 - Limits and some unit conversions (millivolts, kelvin) are inferred from decoder field names. Check them against the mission's documentation.
 - The audit trail is tamper-evident, not tamper-proof: someone with access to the Pi's files could rebuild the chain.
 - No user accounts. Run it on your home network or a private network such as Tailscale, and set `write_passcode` if others can reach it.
@@ -72,6 +89,7 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 
 - Telemetry: the [SatNOGS](https://satnogs.org) network, run by the [Libre Space Foundation](https://libre.space) and volunteer station operators. SatNOGS data is licensed [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
 - Decoding: [satnogs-decoders](https://pypi.org/project/satnogs-decoders/). Orbits: [python-sgp4](https://pypi.org/project/sgp4/).
+- Space weather: [NOAA Space Weather Prediction Center](https://www.swpc.noaa.gov) (public domain).
 - GRBBeta is operated by its own team: <https://grbbeta.tuke.sk/>.
 - Built with help from Claude (Anthropic). Commits it made are marked as co-authored.
 

@@ -226,7 +226,8 @@
       "field": "uhf_digipeater_forwarded_message_count",
       "unit": "",
       "dp": 0,
-      "lim": null
+      "lim": null,
+      "model": false
     },
     {
       "id": "vhf_up",

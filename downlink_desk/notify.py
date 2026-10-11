@@ -91,6 +91,26 @@ def after_fetch(conn, cfg, spec, new_ids, log=print, sat_row=None):
         log(f"Sent {sent} phone alert(s).")
 
 
+def model_changes(conn, cfg, sat_row, model, log=print):
+    """Push when a channel starts drifting away from its learned normal. Remembers each
+    channel's last status so it only fires on the change, at most once a day per channel."""
+    norad, sat = sat_row["norad"], sat_row["name"]
+    prev = dbm.smeta_get(conn, norad, "model_status", {}) or {}
+    cur = {c["id"]: c.get("status") for c in model["channels"]}
+    dbm.smeta_set(conn, norad, "model_status", cur)
+    if not str(cfg["notify"].get("ntfy_topic") or "").strip():
+        return
+    day = dbm.now_ms() // 86_400_000
+    for c in model["channels"]:
+        if c.get("status") == "drift" and prev.get(c["id"]) != "drift" and _once(conn, f"drift:{norad}:{c['id']}:{day}"):
+            dp, unit = int(c.get("dp", 2)), (" " + c["unit"]) if c.get("unit") else ""
+            send(cfg, f"{sat}: {c['name']} drifting",
+                 f"Over the last {model['recent_days']} days {c['name']} has run {c['shift']:+.{dp}f}{unit} "
+                 f"({c['z']:+.1f}σ) away from its normal for the same point in the orbit. This compares it with "
+                 f"its own history, separately from the alarm limits.", "default", "chart_with_upwards_trend")
+            log(f"Sent drift alert for {c['name']}.")
+
+
 def fetch_failed(conn, cfg):
     rows = conn.execute("SELECT ok, message FROM fetches ORDER BY id DESC LIMIT 3").fetchall()
     if len(rows) == 3 and not any(r["ok"] for r in rows) and not dbm.meta_get(conn, "fail_notified", False):

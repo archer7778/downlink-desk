@@ -14,7 +14,9 @@ DEFAULTS = {
     "server": {"host": "0.0.0.0", "port": 8080, "write_passcode": ""},
     "storage": {"db": "data/downlink-desk.db"},
     "alerts": {"stale_hours": 12, "upload_grace_hours": 3, "silent_after": 3, "min_obs_elevation": 15},
-    "notify": {"ntfy_topic": "", "ntfy_server": "https://ntfy.sh", "console_url": ""},
+    "notify": {"ntfy_topic": "", "ntfy_server": "https://ntfy.sh", "console_url": "",
+               "summary_hour": 7, "timezone": ""},
+    "spaceweather": {"enabled": True, "api": "https://services.swpc.noaa.gov"},
 }
 
 

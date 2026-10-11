@@ -67,6 +67,12 @@ CREATE TABLE IF NOT EXISTS satellites (
   enabled INTEGER NOT NULL DEFAULT 1,
   added_ms INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS spacewx (
+  kind TEXT NOT NULL,
+  t_ms INTEGER NOT NULL,
+  value REAL NOT NULL,
+  PRIMARY KEY (kind, t_ms)
+);
 CREATE TABLE IF NOT EXISTS meta (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -86,7 +92,8 @@ def connect(path):
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.executescript(SCHEMA)
     cols = {r[1] for r in conn.execute("PRAGMA table_info(frames)")}
-    for col, typ in (("sunlit", "INTEGER"), ("sub_lat", "REAL"), ("sub_lon", "REAL")):
+    for col, typ in (("sunlit", "INTEGER"), ("sub_lat", "REAL"), ("sub_lon", "REAL"),
+                     ("phase_min", "REAL"), ("shadow_min", "REAL")):
         if col not in cols:
             conn.execute(f"ALTER TABLE frames ADD COLUMN {col} {typ}")
     conn.commit()
