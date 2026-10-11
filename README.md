@@ -5,7 +5,7 @@
 Downlink Desk watches real CubeSats in orbit. It pulls their telemetry from the [SatNOGS](https://satnogs.org) volunteer ground-station network, decodes it on the Pi, learns what normal looks like for each spacecraft, and runs a small operations console around it: alarms, a live feed, phone alerts, space weather and a signed audit trail. It barely touches the Pi: load average 0.00, about 150 MB of RAM, and roughly 1.5 GB of data a year for a busy CubeSat, so a 32 GB card lasts about 15 years.
 
 ![Downlink Desk console showing live GRBBeta telemetry from SatNOGS, running on a Raspberry Pi Zero 2 W](docs/screenshot.png)
-*Live data: GRBBeta, a 2U CubeSat from Slovakia, as seen by a Pi Zero 2 W in Da Nang.*
+*Live data on a Pi Zero 2 W in Da Nang: GRBBeta, a 2U CubeSat from Slovakia, over the South Atlantic Anomaly, 25 minutes before the Piszkéstető station in Hungary hears it (the bold arc).*
 
 ## What it does
 

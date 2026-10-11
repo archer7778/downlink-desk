@@ -1137,7 +1137,8 @@ function drawGlobe(){
     const colr=g.kind==='now'?col('--ok'):g.kind==='next'?col('--warn'):g.kind==='heard'?col('--ok'):col('--muted');
     tri(q[0],q[1],g.kind==='next'||g.kind==='now'?6:4);c.fillStyle=colr;c.globalAlpha=g.kind==='later'?.7:1;c.fill();c.globalAlpha=1;
     if(g.kind==='now'){c.beginPath();c.arc(q[0],q[1],9+4*(Math.floor(now/500)%2),0,2*Math.PI);c.strokeStyle=colr;c.lineWidth=1.5;c.stroke()}
-    if(g.kind==='next'||g.kind==='now'){c.font='600 11px IBM Plex Sans,system-ui,sans-serif';c.fillStyle=col('--ink');c.fillText(g.name,q[0]+8,q[1]+12)}}
+    if(g.kind==='next'||g.kind==='now'){c.font='600 11px IBM Plex Sans,system-ui,sans-serif';c.fillStyle=col('--ink');
+      const w=c.measureText(g.name).width,x=q[0]+8+w>cx+R-4?q[0]-8-w:q[0]+8;c.fillText(g.name,x,q[1]+12)}}   // keep labels inside the globe
   const T=G.track&&G.track.points;
   if(T&&st.next){const o=st.next,seg=T.filter(p=>p[0]>=o.start&&p[0]<=o.end).map(p=>[p[1],p[2]]);
     if(seg.length>1){c.strokeStyle=col('--warn');c.lineWidth=4;c.globalAlpha=.85;line(seg);c.globalAlpha=1}}
@@ -1154,7 +1155,8 @@ function drawGlobe(){
       for(const g of st.list){if(g.kind!=='now')continue;const qs=P(g.lat,g.lng);if(qs[2]<=0)continue;
         c.strokeStyle=col('--ok');c.lineWidth=1.5;c.setLineDash([2,3]);c.beginPath();c.moveTo(q[0],q[1]);c.lineTo(qs[0],qs[1]);c.stroke();c.setLineDash([])}
       c.beginPath();c.arc(q[0],q[1],5.5,0,2*Math.PI);c.fillStyle=acc;c.fill();c.lineWidth=2;c.strokeStyle=col('--panel');c.stroke();
-      c.font='600 12px IBM Plex Sans Condensed,system-ui,sans-serif';c.fillStyle=col('--ink');c.fillText(CONF.satellite.name,q[0]+9,q[1]-8)}
+      c.font='600 12px IBM Plex Sans Condensed,system-ui,sans-serif';c.fillStyle=col('--ink');
+      const w=c.measureText(CONF.satellite.name).width;c.fillText(CONF.satellite.name,q[0]+9+w>cx+R-4?q[0]-9-w:q[0]+9,q[1]-8)}
   }
   c.restore();c.beginPath();c.arc(cx,cy,R,0,2*Math.PI);c.lineWidth=1;c.strokeStyle=col('--line');c.stroke();
   // numbers under the globe
