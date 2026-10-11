@@ -250,5 +250,28 @@
       "lim": null,
       "counter": "reboot"
     }
-  ]
+  ],
+  "battery": {
+    "source": "GRBBeta's team hasn't published its battery. Its platform comes from Spacemanic, whose AMUN power unit datasheet (SM-AMU-DS-0001) lists a 20 Wh battery at typically 8 V with on-board heating, which points to two lithium-ion cells in series. The raw voltage reading (about 16,400) matches 8.2 V at 0.5 mV per count. Both are assumptions until the team confirms them.",
+    "chemistry": "Li-ion, 2 cells in series (assumed)",
+    "capacity_wh": 20,
+    "nominal_v": 7.4,
+    "v_full": 8.4,
+    "v_empty": 6.0,
+    "voltage": {
+      "channel": "bat_v",
+      "scale": "auto"
+    },
+    "charge": "bat_chg",
+    "discharge": "bat_dis",
+    "temperature": "bat_t",
+    "charge_temp": [
+      0,
+      45
+    ],
+    "discharge_temp": [
+      -20,
+      60
+    ]
+  }
 }

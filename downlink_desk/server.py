@@ -15,7 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import __version__, baseline, logchain, spacewx, summary
+from . import __version__, baseline, battery, logchain, spacewx, summary
 from . import db as dbm
 from .analysis import observation_report, silent_streak
 from .catalog import channels_for, entries, featured, find
@@ -263,6 +263,12 @@ class App:
         self._model_cache[n] = (key, m)
         return m
 
+    def battery(self, sat):
+        launched = next((f.get("launched") for f in featured() if f["norad"] == sat["norad"]), None)
+        spec = self.spec(sat)
+        with self.lock:
+            return battery.analyse(self.conn, spec, sat["norad"], launched)
+
     def profile(self, sat, ch):
         with self.lock:
             return baseline.profile(self.conn, self.spec(sat), sat["norad"], ch)
@@ -382,6 +388,8 @@ def make_handler(app):
                     return self._json(app.eclipses(sat, since, min(int(q.get("until", now)), now + 86_400_000)))
                 if p == "/api/now":
                     return self._json(app.now_state(sat))
+                if p == "/api/battery":
+                    return self._json(app.battery(sat))
                 if p == "/api/model":
                     return self._json(app.model(sat))
                 if p == "/api/profile":

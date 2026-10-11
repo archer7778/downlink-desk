@@ -92,6 +92,18 @@ def satellite_section(conn, cfg, sat, now):
             lines.append("Health model: still learning what normal looks like")
     except Exception as e:   # never lose the summary over the model
         lines.append(f"(health model unavailable: {e})")
+    # battery
+    try:
+        from . import battery
+        from .catalog import featured
+        launched = next((f.get("launched") for f in featured() if f["norad"] == n), None)
+        bl = battery.summary_line(battery.analyse(conn, spec, n, launched, now))
+        if bl:
+            lines.append(bl)
+            if bl.startswith("Battery concern"):
+                flags.append("battery")
+    except Exception as e:
+        lines.append(f"(battery check unavailable: {e})")
     # passes over the station
     st = cfg["station"]
     tle = dbm.smeta_get(conn, n, "tle")

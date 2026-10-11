@@ -289,8 +289,63 @@ def test_model_spaceweather_summary_stream():
         shutil.rmtree(tmp)
 
 
+def test_battery_health():
+    """Synthetic 2S lithium-ion pack: the check should recover the energy balance, eclipse depth
+    and internal resistance that were put into the data."""
+    import random
+    from downlink_desk import battery
+    from downlink_desk.orbit import period_min
+    from sgp4.api import Satrec
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        cfg = make_cfg(tmp, 8772)
+        conn = dbm.open_db(cfg)
+        dbm.smeta_set(conn, 60237, "tle", {"tle1": mock_satnogs.TLE[0], "tle2": mock_satnogs.TLE[1], "epoch_ms": dbm.now_ms()})
+        spec = cfg.channels()
+        P = period_min(Satrec.twoline2rv(*mock_satnogs.TLE))
+        from downlink_desk.orbit import shadow_minutes
+        sh = shadow_minutes(*mock_satnogs.TLE, dbm.now_ms())
+        sunset, cap, R = P - sh, 20 / 7.4 * 1000, 0.12
+        use = sh * 450 / 60
+        rnd = random.Random(5)
+        now = dbm.now_ms()
+        for i in range(14 * 72):
+            t = now - 14 * 86_400_000 + i * 1_200_000
+            ph = rnd.uniform(0, P)
+            if ph >= sunset:
+                soc, ic, idc = 1 - (ph - sunset) * 450 / 60 / cap, 0.0, 450.0
+            else:
+                soc, ic, idc = min(1.0, 1 - use / cap + ph * 300 / 60 / cap), 750.0, 450.0
+            ic = max(0.0, ic + rnd.gauss(0, 50)) if ic else 0.0
+            idc += rnd.gauss(0, 50)
+            v = 7.4 + 1.0 * soc + R * (ic - idc) / 1000 + rnd.gauss(0, .003)
+            fid = 700000 + i
+            conn.execute("INSERT INTO frames(id,ts_ms,frame_hex,decoded_ok,fetched_ms,norad,sunlit,phase_min,shadow_min)"
+                         " VALUES(?,?,?,1,?,60237,?,?,?)", (fid, t, "b%05x" % i, t, 0 if ph >= sunset else 1, ph, sh))
+            conn.executemany("INSERT INTO points(ts_ms,channel,value,frame_id,norad) VALUES(?,?,?,?,60237)",
+                             [(t, "bat_v", round(v / 0.0005), fid), (t, "bat_chg", ic, fid), (t, "bat_dis", idc, fid),
+                              (t, "bat_t", 12 + 6 * (1 if ph < sunset else -1) + rnd.gauss(0, 1), fid)])
+        conn.commit()
+        r = battery.analyse(conn, spec, 60237, "2024-07-09")
+        print("battery:", {k: r.get(k) for k in ("grade", "volt_scale", "balance_mah", "dod", "v_top", "v_end_eclipse",
+                                                 "resistance_mohm", "cycles", "life")})
+        for c in r["checks"]:
+            print(f"  [{c['status']}] {c['title']}: {c['value']}")
+        expect_bal = (sunset * 300 - sh * 450) / 60
+        assert r["volt_scale"] == 0.0005
+        assert abs(r["balance_mah"] - expect_bal) < 25, (r["balance_mah"], expect_bal)
+        assert abs(r["dod"] - use / cap) < 0.02, (r["dod"], use / cap)
+        assert 80 < r["resistance_mohm"] < 160, r["resistance_mohm"]
+        assert r["cycles"] > 10_000 and 0.8 < r["life"]["capacity_now"] < 1.0
+        assert r["grade"] in ("good", "watch")
+        print(" ", battery.summary_line(r))
+    finally:
+        shutil.rmtree(tmp)
+
+
 if __name__ == "__main__":
     test_migrates_v02_database()
     test_pipeline()
     test_model_spaceweather_summary_stream()
+    test_battery_health()
     print("OK")
