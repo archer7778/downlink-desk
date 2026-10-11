@@ -84,6 +84,17 @@ timezone = "Asia/Ho_Chi_Minh"
 
 Preview it any time with `.venv/bin/python -m downlink_desk.fetch --summary` (add `--send` to push it now).
 
+## Starting at boot and updating itself
+
+Nothing to do: the installer sets the console and the fetch job to start whenever the Pi powers up. It also installs an updater that checks GitHub 5 minutes after boot and every night at about 03:30. When there's a new version it pulls it, installs any new Python packages, restarts the console and checks it answers; if anything goes wrong it rolls back to the version that was running. It won't update while files in the repository have been edited on the Pi (it says so in the console instead), and it never touches `config.toml`, `secrets/` or `data/`.
+
+- Update now: `sudo ~/downlink-desk/deploy/update.sh`
+- Just check: `sudo ~/downlink-desk/deploy/update.sh --check`
+- Turn automatic updates off: `auto_update = false` under `[updates]` in `config.toml`
+- What it did: About tab in the console, or `journalctl -u downlink-desk-update`
+
+The console's Ground segment shows the SD card's size, how full it is, the database size and roughly how long until it fills. You get a phone alert if it drops below 10% or 1 GB free.
+
 ## After updating
 
 When an update changes units or adds orbit context, recalculate stored data once:

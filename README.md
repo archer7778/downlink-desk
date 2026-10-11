@@ -32,6 +32,7 @@ Downlink Desk watches real CubeSats in orbit. It pulls their telemetry from the 
 **Runs like a real operations desk**
 - **Morning summary on your phone** through the free ntfy app: last night's frames, stations, restarts, drifts, storms and the day's best pass. Alarms, restarts and silence are pushed as they happen.
 - **A signed audit trail:** every acknowledgement, shelve, limit change and handover is hash-chained on the Pi, so an edit or deletion shows up on verify.
+- **Looks after itself:** starts at boot, updates itself from GitHub after boot and nightly (rolling back if the new version doesn't come up), and watches the SD card's free space.
 - **Shift handover report, daily check, equipment status,** and a **training simulator** with fault injection.
 - **Several satellites at once:** a picker with bios for featured CubeSats, and a catalog of every satellite in orbit that SatNOGS can decode.
 

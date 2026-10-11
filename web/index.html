@@ -530,6 +530,7 @@ function derive(now){
     if(!HEALTH.token_present)alerts.push({id:'token@0',key:'token',sev:'crit',sev0:'crit',raised:HEALTH.server_started_ms,cleared:null,msg:'No SatNOGS API key on this Pi yet, so no data can be fetched',first:''});
     else if(HEALTH.auth_error)alerts.push({id:'auth@'+(HEALTH.last_attempt_ms||0),key:'auth',sev:'crit',sev0:'crit',raised:HEALTH.last_attempt_ms||now,cleared:null,msg:'SatNOGS rejected the API key. Check secrets/satnogs_token on the Pi',first:''});
     const lim=3*CONF.poll_minutes*MIN,base=HEALTH.last_ok_ms||HEALTH.server_started_ms;
+    const SS=HEALTH.storage||{};if(SS.level&&SS.level!=='ok')alerts.push({id:'disk@'+fmtD(now),key:'disk',sev:SS.level,sev0:SS.level,raised:now,cleared:null,msg:`The Pi's SD card is ${SS.level==='crit'?'nearly full':'getting full'}: ${fmtB(SS.disk_free)} free of ${fmtB(SS.disk_total)}`,first:''});
     if(HEALTH.token_present&&now-base>lim)alerts.push({id:'fetch@'+base,key:'fetch',sev:'crit',sev0:'crit',raised:base+lim,cleared:null,msg:HEALTH.last_ok_ms?`The Pi hasn't reached SatNOGS since ${fmtDT(HEALTH.last_ok_ms)}`:'The Pi has not completed a fetch from SatNOGS yet',first:''});
   }
   // scheduled observations that delivered nothing, several in a row
@@ -640,11 +641,18 @@ function renderProc(now){
   $('#proc').innerHTML=PROC.map(([id,txt])=>{const d=c[id];return `<button class="step${d?' done':''}" data-step="${id}" data-day="${day}" ${d?'disabled':''}><span class="box">${d?'✓':''}</span><span>${esc(txt)}${d?`<span class="who">${esc(d.cs)} · ${fmtT(d.t)}</span>`:''}</span></button>`}).join('')+'<div style="height:8px"></div>';
 }
 let eqPending=null;
-function renderEquip(now){
+const fmtB=b=>b>=1e9?(b/1e9).toFixed(b>=1e10?0:1)+' GB':b>=1e6?(b/1e6).toFixed(1)+' MB':Math.max(1,Math.round(b/1e3))+' kB';
+function sdText(st){if(!st)return '';const parts=[];
+  if(st.disk_total)parts.push(`SD card ${Math.round((1-st.disk_free/st.disk_total)*100)}% used (${fmtB(st.disk_free)} free of ${fmtB(st.disk_total)})`);
+  parts.push('database '+fmtB(st.db_bytes||0));
+  if(st.days_to_full)parts.push(st.days_to_full>3650?'room for 10+ years':`room for about ${st.days_to_full>730?Math.round(st.days_to_full/365)+' years':st.days_to_full+' days'}`);
+  return parts.join(' · ')}
+let SDL='ok';
+function renderEquip(now){SDL=HEALTH&&HEALTH.storage&&HEALTH.storage.level||'ok';
   const H=HEALTH;const fails=H?H.fetches.slice(0,3).filter(f=>!f.ok).length:0;
   const link=!H?['stale','Unknown','']:H.auth_error?['crit','Key rejected','SatNOGS refused the API key']:!H.token_present?['crit','No API key','Add it to secrets/satnogs_token']:(AV_cache.open.some(a=>a.key==='fetch'))?['crit','Down',H.fetches[0]?H.fetches[0].message:'']:fails?['warn','Degraded',H.fetches[0].message]:['ok','Operational',H.fetches[0]?H.fetches[0].message:'No fetches yet'];
   const auto=[
-    {name:'Raspberry Pi server',st:online?['ok','Operational']:['crit','Unreachable'],note:H?`Up ${ago(now-H.server_started_ms)} · database ${H.db_bytes<1e6?Math.max(1,Math.round(H.db_bytes/1e3))+' kB':(H.db_bytes/1e6).toFixed(1)+' MB'}`:''},
+    {name:'Raspberry Pi server',st:!online?['crit','Unreachable']:SDL==='crit'?['crit','Disk full']:SDL==='warn'?['warn','Low space']:['ok','Operational'],note:H?`Up ${ago(now-H.server_started_ms)} · ${sdText(H.storage)}`:''},
     {name:'SatNOGS link',st:[link[0],link[1]],note:link[2]}];
   let html=auto.map(a=>`<tr><td style="width:1%"><span class="dot ${a.st[0]}"></span></td><td><div class="nm">${esc(a.name)}</div><div class="nt">${esc(a.note)}</div></td><td style="text-align:right"><span class="pill ${a.st[0]}">${esc(a.st[1])}</span></td></tr>`).join('');
   html+=MANUAL_EQ.map(e=>{const s=eqAt(e.id),pend=eqPending&&eqPending.id===e.id;
@@ -863,7 +871,7 @@ function renderAbout(){
   $('#satCredit').innerHTML=sat.website?`${esc(s.name)} is operated by its own team; see <a href="${esc(sat.website)}" target="_blank" rel="noopener">${esc(sat.website)}</a>.`:'';
   $('#specNote').textContent=CONF.spec.notes||'';
   $('#specBody').innerHTML=CH.map(c=>`<tr><td>${esc(c.name)}</td><td class="mono">${esc((c.fields||[c.field]).join(', '))}</td><td class="mono">${esc(c.transform||'none')}</td><td class="mono">${esc(c.unit)}</td><td class="mono">${limTxt(c.lim)}</td></tr>`).join('');
-  $('#sysKv').innerHTML=[['Satellite',`${s.name} · NORAD ${s.norad} · decoder ${s.decoder}`],['SatNOGS status',sat.status||'—'],['Station',`${CONF.station.name} (${CONF.station.lat}, ${CONF.station.lon})`],['Fetch interval',CONF.poll_minutes+' min'],['Phone alerts',CONF.phone_alerts?'On (ntfy)':'Off. Set ntfy_topic in config.toml to get alarms on your phone'],['Downlink Desk',CONF.version],['Commissioned',CONF.commissioned_ms?fmtDT(CONF.commissioned_ms):'—']].map(([k,v])=>`<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('');
+  $('#sysKv').innerHTML=[['Satellite',`${s.name} · NORAD ${s.norad} · decoder ${s.decoder}`],['SatNOGS status',sat.status||'—'],['Station',`${CONF.station.name} (${CONF.station.lat}, ${CONF.station.lon})`],['Fetch interval',CONF.poll_minutes+' min'],['Phone alerts',CONF.phone_alerts?'On (ntfy)':'Off. Set ntfy_topic in config.toml to get alarms on your phone'],['Downlink Desk',CONF.version+(HEALTH&&HEALTH.update?` · ${HEALTH.update.message} (checked ${ago(Date.now()-HEALTH.update.t_ms)} ago)`:'')+(HEALTH?(HEALTH.auto_update?' · updates itself after boot and nightly':' · automatic updates off'):'')],['Storage',HEALTH?sdText(HEALTH.storage):'—'],['Commissioned',CONF.commissioned_ms?fmtDT(CONF.commissioned_ms):'—']].map(([k,v])=>`<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('');
 }
 
 /* ---------- sound ---------- */

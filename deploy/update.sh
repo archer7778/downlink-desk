@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+# Downlink Desk self-update. Run by downlink-desk-update.timer (a few minutes after boot, then
+# nightly), or by hand:   sudo ./deploy/update.sh
+#
+# Pulls new commits from GitHub only when that's a clean fast-forward, installs any new Python
+# packages, refreshes the systemd units if they changed, restarts the console, and checks it
+# answers. If anything fails it rolls back to the version that was running.
+# It never touches config.toml, secrets/ or data/. Set auto_update = false under [updates] in
+# config.toml to stop it (checks still run with --check).
+set -uo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+USER_NAME="$(stat -c %U "$ROOT")"
+STATUS="$ROOT/data/update.json"
+cd "$ROOT"
+
+as_user() { if [ "$(id -u)" -eq 0 ]; then runuser -u "$USER_NAME" -- "$@"; else "$@"; fi; }
+cfgval() { awk -F= -v k="$1" '$1 ~ "^"k"[ ]*$" {sub(/#.*/,"",$2); gsub(/[ "]/,"",$2); print $2; exit}' config.toml 2>/dev/null; }
+status() {   # status <result> <message> [from] [to]
+  mkdir -p "$ROOT/data"
+  printf '{"t_ms":%s,"result":"%s","message":"%s","from":"%s","to":"%s","branch":"%s"}\n' \
+    "$(date +%s%3N)" "$1" "$(printf '%s' "$2" | tr '"\\' "''")" "${3:-}" "${4:-}" "$BRANCH" > "$STATUS"
+  chown "$USER_NAME" "$STATUS" 2>/dev/null || true
+  echo "$2"
+}
+
+BRANCH="$(as_user git rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
+AUTO="$(cfgval auto_update)"; AUTO="${AUTO:-true}"
+
+if ! as_user git fetch -q origin "$BRANCH" 2>/dev/null; then
+  status offline "Couldn't reach GitHub to check for updates; will try again later."
+  exit 0
+fi
+LOCAL="$(as_user git rev-parse --short HEAD)"
+REMOTE="$(as_user git rev-parse --short "origin/$BRANCH")"
+if [ "$LOCAL" = "$REMOTE" ]; then
+  status current "Up to date (version $(as_user git log -1 --format=%cs) $LOCAL)." "$LOCAL" "$LOCAL"
+  exit 0
+fi
+if ! as_user git merge-base --is-ancestor HEAD "origin/$BRANCH"; then
+  status held "Not updating: this Pi has its own commits. Merge by hand." "$LOCAL" "$REMOTE"
+  exit 0
+fi
+if ! as_user git diff --quiet || ! as_user git diff --cached --quiet; then
+  status held "Not updating: files in the repository were edited on this Pi ($(as_user git diff --name-only | tr '\n' ' ')). Commit or undo them, then it updates." "$LOCAL" "$REMOTE"
+  exit 0
+fi
+if [ "$AUTO" = "false" ] || [ "${1:-}" = "--check" ]; then
+  status available "Update available: $LOCAL → $REMOTE ($(as_user git rev-list --count HEAD..origin/$BRANCH) commits)." "$LOCAL" "$REMOTE"
+  exit 0
+fi
+
+CHANGED="$(as_user git diff --name-only HEAD "origin/$BRANCH")"
+rollback() {
+  as_user git reset -q --hard "$LOCAL"
+  [ "$(id -u)" -eq 0 ] && systemctl restart downlink-desk-web 2>/dev/null
+  status failed "Update to $REMOTE failed ($1); rolled back to $LOCAL." "$LOCAL" "$REMOTE"
+  exit 1
+}
+
+as_user git merge -q --ff-only "origin/$BRANCH" || rollback "git merge"
+if grep -q '^requirements.txt$' <<<"$CHANGED"; then
+  as_user .venv/bin/pip install -q -r requirements.txt || rollback "installing Python packages"
+fi
+as_user .venv/bin/python -c "import downlink_desk.server, downlink_desk.fetch" || rollback "the new code doesn't load"
+
+if [ "$(id -u)" -eq 0 ]; then
+  if grep -qE '^deploy/.*\.(service|timer)$' <<<"$CHANGED"; then
+    for f in deploy/*.service deploy/*.timer; do
+      sed -e "s#@ROOT@#${ROOT}#g" -e "s#@USER@#${USER_NAME}#g" "$f" > "/etc/systemd/system/$(basename "$f")"
+    done
+    POLL="$(cfgval poll_minutes)"; POLL="${POLL:-30}"; [ "$POLL" -lt 20 ] && POLL=20
+    sed -i "s#^OnUnitActiveSec=.*#OnUnitActiveSec=${POLL}min#" /etc/systemd/system/downlink-desk-fetch.timer
+    systemctl daemon-reload
+    systemctl enable downlink-desk-web.service downlink-desk-fetch.timer downlink-desk-update.timer >/dev/null 2>&1
+  fi
+  systemctl restart downlink-desk-web
+  PORT="$(cfgval port)"; PORT="${PORT:-8080}"
+  ok=""
+  for _ in $(seq 1 20); do
+    sleep 3
+    if as_user .venv/bin/python -c "import urllib.request,sys; urllib.request.urlopen('http://127.0.0.1:${PORT}/api/health', timeout=5)" 2>/dev/null; then ok=1; break; fi
+  done
+  [ -n "$ok" ] || rollback "the console didn't come back after restarting"
+fi
+status updated "Updated $LOCAL → $REMOTE: $(as_user git log --format=%s -1)." "$LOCAL" "$REMOTE"

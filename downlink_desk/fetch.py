@@ -243,6 +243,7 @@ def run(cfg, force=False, log=print, only=None):
         spacewx.refresh(conn, cfg, log)
         for sat_row in dbm.satellites(conn):   # catch up orbit phases (also after an upgrade)
             baseline.fill_phases(conn, sat_row["norad"])
+        notify.storage_check(conn, cfg, log)
         try:
             summary.maybe_send(conn, cfg, log)
         except Exception as e:

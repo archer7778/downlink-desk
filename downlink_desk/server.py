@@ -215,18 +215,20 @@ class App:
             satmeta = dbm.smeta_get(self.conn, n, "satellite") or {}
             last_attempt = dbm.smeta_get(self.conn, n, "last_attempt_ms")
             last_ok = dbm.smeta_get(self.conn, n, "last_ok_ms")
-        size = 0
-        for suffix in ("", "-wal"):   # in WAL mode recent data lives in the -wal file until a checkpoint
-            try:
-                size += self.cfg.db_path.with_name(self.cfg.db_path.name + suffix).stat().st_size
-            except OSError:
-                pass
+        with self.lock:
+            store = dbm.storage(self.conn, self.cfg.db_path)
+        size = store.get("db_bytes", 0)
+        try:
+            upd = json.loads((self.cfg.db_path.parent / "update.json").read_text())
+        except (OSError, ValueError):
+            upd = None
         return {"now": dbm.now_ms(), "server_started_ms": STARTED, "last_attempt_ms": last_attempt,
                 "last_ok_ms": last_ok, "auth_error": bool(g("auth_error", False)),
                 "token_present": bool(self.cfg.token), "fetches": fetches,
                 "frames_total": counts["n"], "frames_decoded": counts["ok"] or 0, "last_frame_ms": counts["last"],
                 "db_bytes": size, "tle_epoch_ms": tle.get("epoch_ms"), "satellite": satmeta,
-                "fetching": self._fetching}
+                "fetching": self._fetching, "storage": store, "update": upd,
+                "auto_update": bool(self.cfg["updates"].get("auto_update", True)), "version": __version__}
 
     def passes(self, sat, hours):
         cached = self._pass_cache.get(sat["norad"])

@@ -54,3 +54,8 @@ timezone = ""                       # e.g. "Asia/Ho_Chi_Minh"; blank uses the Pi
 # Public data, no key needed, fetched every 3 hours.
 enabled = true
 api = "https://services.swpc.noaa.gov"
+
+[updates]
+# The Pi checks GitHub 5 minutes after boot and every night at about 03:30, and updates itself when
+# there's a clean new version (it rolls back if the console doesn't come back). false = only report.
+auto_update = true
