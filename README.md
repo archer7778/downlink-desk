@@ -84,7 +84,7 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 ## Limitations
 
 - Data arrives minutes to hours after a pass, only when a volunteer station heard the satellite and uploaded it. "Live" means live from the moment the Pi stores it.
-- The health model needs about 25 samples per channel, and a few days of history, before it judges anything. Orbit positions for old frames use the current orbit data, so frames more than 45 days older than it are left out of the model.
+- The health model needs about 25 samples per channel, and a few days of history, before it judges anything. The Pi fills in three weeks of older frames from SatNOGS a few pages at a time (or all at once with `python -m downlink_desk.fetch --history 21`). Orbit positions for old frames use the current orbit data, so frames more than 45 days older than it are left out of the model.
 - The battery life figure is a model. GRBBeta's battery size and voltage scale are inferred from its platform builder's published power unit (20 Wh, about 8 V) and from the data itself, not confirmed by the team; correct them in `channels/grbbeta.json` if you know better.
 - The South Atlantic Anomaly outline is an approximate ellipse; the real edge depends on altitude.
 - Limits and some unit conversions (millivolts, kelvin) are inferred from decoder field names. Check them against the mission's documentation.

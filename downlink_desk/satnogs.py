@@ -83,10 +83,15 @@ class Client:
         items = data.get("results", data) if isinstance(data, dict) else data
         return items[0] if items else None
 
-    def telemetry(self, norad, newer_than_ms=None, max_pages=3):
+    def telemetry(self, norad, newer_than_ms=None, max_pages=3, start_ms=None, end_ms=None):
         """Newest-first frames. Stops paging once it reaches frames we already have.
+        start_ms/end_ms limit the time window (used to fill in history, oldest end first).
         Handles both the cursor shape ({next, results}) and a bare list."""
         frames, url, params = [], f"{self.api}/telemetry/", {"satellite": norad, "format": "json"}
+        if start_ms is not None:
+            params["start"] = _iso(start_ms)
+        if end_ms is not None:
+            params["end"] = _iso(end_ms)
         for _ in range(max_pages):
             data = self._get(url, params, auth=True)
             page = data.get("results", []) if isinstance(data, dict) else data
@@ -131,6 +136,10 @@ def scheduled_observations(network_api, norad):
                     "lng": o.get("station_lng"), "max_alt": o.get("max_altitude"),
                     "mode": str(o.get("transmitter_description") or o.get("transmitter_mode") or "")[:80]})
     return out, len(items) < 50
+
+
+def _iso(ms):
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ms / 1000))
 
 
 def parse_ts(s):

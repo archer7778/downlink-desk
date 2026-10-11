@@ -7,11 +7,13 @@ Run by a systemd timer (every `poll_minutes`). Safe to run by hand:
     python -m downlink_desk.fetch --rebuild       # recompute values after editing a channels file
     python -m downlink_desk.fetch --summary       # print the morning summary (and send it, with --send)
     python -m downlink_desk.fetch --spaceweather  # refresh NOAA space weather now
+    python -m downlink_desk.fetch --history 21    # fill in three weeks of older frames now
 """
 import argparse
 import fcntl
 import json
 import sys
+import time
 
 from . import baseline, catalog, spacewx, summary
 from . import db as dbm
@@ -127,6 +129,38 @@ def store(conn, sat_row, spec, frames):
     return new, new_ids
 
 
+def fill_history(conn, cfg, client, sat_row, spec, log, pages=None, days=None):
+    """Walk back through older frames on SatNOGS, a few pages at a time, until `history_days`
+    are stored (or SatNOGS has nothing older). Old frames feed the health model and the
+    battery check; they never trigger phone alerts. Returns True when history is complete."""
+    sc = cfg["satnogs"]
+    norad = sat_row["norad"]
+    days = sc["history_days"] if days is None else days
+    pages = int(sc["history_pages_per_fetch"] if pages is None else pages)
+    target = dbm.now_ms() - int(days * DAY_MS)
+    done = dbm.smeta_get(conn, norad, "history_done_ms")
+    if pages <= 0 or (done is not None and done <= target):
+        return True
+    oldest = conn.execute("SELECT MIN(ts_ms) FROM frames WHERE norad=?", (norad,)).fetchone()[0]
+    if oldest is None:
+        return False
+    if oldest <= target:
+        dbm.smeta_set(conn, norad, "history_done_ms", target)
+        return True
+    frames = client.telemetry(norad, max_pages=pages, start_ms=target, end_ms=oldest - 1)
+    new, _ = store(conn, sat_row, spec, frames)
+    baseline.fill_phases(conn, norad)
+    older = [satnogs.parse_ts(f.get("timestamp")) for f in frames]
+    older = min([t for t in older if t], default=None)
+    if len(frames) < pages * 25 or older is None or older >= oldest:   # nothing older in the window
+        dbm.smeta_set(conn, norad, "history_done_ms", target)
+        log(f"[{norad}] History complete back to {time.strftime('%Y-%m-%d', time.gmtime((older or oldest) / 1000))}.")
+        return True
+    log(f"[{norad}] History: {new} older frames added, now back to "
+        f"{time.strftime('%Y-%m-%d %H:%M', time.gmtime((older or oldest) / 1000))} UTC.")
+    return False
+
+
 def fetch_one(conn, cfg, client, sat_row, force, log):
     sc = cfg["satnogs"]
     norad = sat_row["norad"]
@@ -176,6 +210,10 @@ def fetch_one(conn, cfg, client, sat_row, force, log):
     baseline.fill_phases(conn, norad)   # orbit phase for the new frames, before the model looks at them
     notify.after_fetch(conn, cfg, spec, new_ids, log, sat_row)
     try:
+        fill_history(conn, cfg, client, sat_row, spec, log)
+    except satnogs.Refused as e:
+        log(f"[{norad}] History paused: {e}")
+    try:
         notify.model_changes(conn, cfg, sat_row, baseline.compute(conn, spec, norad), log)
     except Exception as e:   # the model is an extra; a bad channel must never stop fetching
         log(f"[{norad}] Health model skipped: {e}")
@@ -210,6 +248,37 @@ def run(cfg, force=False, log=print, only=None):
         except Exception as e:
             log(f"Morning summary skipped: {e}")
         return worst
+    finally:
+        fcntl.flock(lock, fcntl.LOCK_UN)
+        lock.close()
+
+
+def history(cfg, days, only=None, log=print):
+    """One-off: fill in history now instead of a few pages per fetch."""
+    conn = dbm.open_db(cfg)
+    lock = open(cfg.db_path.parent / "fetch.lock", "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        log("A fetch is running; try again in a minute.")
+        return 1
+    try:
+        client = satnogs.Client(cfg["satnogs"]["api"], cfg.token)
+        for sat_row in dbm.satellites(conn):
+            if only and sat_row["norad"] != only:
+                continue
+            dbm.smeta_set(conn, sat_row["norad"], "history_done_ms", None)
+            spec = spec_for(cfg, sat_row)
+            log(f"[{sat_row['norad']}] Filling in {days:g} days of {sat_row['name']} history from SatNOGS "
+                "(one request every 11 s; Ctrl+C is safe, it carries on at the next fetch)...")
+            try:
+                while not fill_history(conn, cfg, client, sat_row, spec, log, pages=10, days=days):
+                    pass
+            except satnogs.Refused as e:
+                log(f"SatNOGS paused us: {e}. The rest will fill in with the regular fetches.")
+        n = conn.execute("SELECT COUNT(*), MIN(ts_ms) FROM frames").fetchone()
+        log(f"Done: {n[0]} frames stored, oldest {time.strftime('%Y-%m-%d', time.gmtime((n[1] or 0) / 1000))}.")
+        return 0
     finally:
         fcntl.flock(lock, fcntl.LOCK_UN)
         lock.close()
@@ -253,8 +322,12 @@ def main(argv=None):
     ap.add_argument("--summary", action="store_true", help="print the morning summary")
     ap.add_argument("--send", action="store_true", help="with --summary: also push it to your phone now")
     ap.add_argument("--spaceweather", action="store_true", help="refresh NOAA space weather now")
+    ap.add_argument("--history", type=float, metavar="DAYS",
+                    help="fill in this many days of older frames now (polite: about 2 min per 1,000 frames)")
     a = ap.parse_args(argv)
     cfg = find_config(a.config)
+    if a.history:
+        sys.exit(history(cfg, a.history, only=a.sat))
     if a.spaceweather:
         spacewx.refresh(dbm.open_db(cfg), cfg, force=True)
         sys.exit(0)

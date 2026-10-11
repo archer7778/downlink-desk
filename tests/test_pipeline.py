@@ -289,6 +289,35 @@ def test_model_spaceweather_summary_stream():
         shutil.rmtree(tmp)
 
 
+def test_history_fill():
+    """A fresh install only takes the newest page; history then fills in from SatNOGS by time window."""
+    httpd, state, frames = mock_satnogs.serve(8773)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        cfg = make_cfg(tmp, 8773)
+        cfg.data["satnogs"].update(backfill_pages=1, history_pages_per_fetch=0)
+        msgs = []
+        assert fetch.run(cfg, force=True, log=msgs.append) == 0
+        conn = dbm.open_db(cfg)
+        n1 = conn.execute("SELECT COUNT(*) FROM frames").fetchone()[0]
+        assert fetch.history(cfg, 21, log=msgs.append) == 0, msgs
+        n2, oldest = conn.execute("SELECT COUNT(*), MIN(ts_ms) FROM frames").fetchone()
+        print("history:", n1, "->", n2, "of", len(frames), "|", [m for m in msgs if "History" in m][-1])
+        assert n1 == 25 and n2 == len(frames)
+        assert any(w[0] and w[1] for w in state["windows"])
+        assert dbm.smeta_get(conn, 60237, "history_done_ms")
+        assert conn.execute("SELECT COUNT(*) FROM frames WHERE phase_min IS NULL").fetchone()[0] == 0
+        # once complete, regular fetches don't ask for history again
+        before = len(state["windows"])
+        cfg.data["satnogs"]["history_pages_per_fetch"] = 8
+        fetch.run(cfg, force=True, log=msgs.append)
+        assert all(not (w[0] and w[1]) for w in state["windows"][before:])
+    finally:
+        httpd.shutdown()
+        shutil.rmtree(tmp)
+
+
 def test_battery_health():
     """Synthetic 2S lithium-ion pack: the check should recover the energy balance, eclipse depth
     and internal resistance that were put into the data."""
@@ -348,4 +377,5 @@ if __name__ == "__main__":
     test_pipeline()
     test_model_spaceweather_summary_stream()
     test_battery_health()
+    test_history_fill()
     print("OK")

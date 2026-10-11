@@ -174,9 +174,15 @@ def serve(port, token="test-token", page_size=25, require_token=True):
                     return self._json({"detail": "satellite is required"}, 400)
                 sat = q.get("satellite") or q.get("sat", "60237")
                 src = frames if sat == "60237" else shifted if sat == "99999" else []
+                if q.get("start"):
+                    src = [f for f in src if f["timestamp"] >= q["start"]]
+                if q.get("end"):
+                    src = [f for f in src if f["timestamp"] <= q["end"]]
+                state.setdefault("windows", []).append((q.get("start"), q.get("end")))
                 start = int(q.get("cursor", 0))
                 page = src[start:start + page_size]
-                nxt = f"{base}/api/telemetry/?cursor={start + page_size}&sat={sat}" if start + page_size < len(src) else None
+                extra = "".join(f"&{k}={q[k]}" for k in ("start", "end") if q.get(k))
+                nxt = f"{base}/api/telemetry/?cursor={start + page_size}&sat={sat}{extra}" if start + page_size < len(src) else None
                 return self._json({"next": nxt, "previous": None, "results": page})
             # NOAA SWPC look-alikes (same shapes as the real products, October 2026)
             if u.path == "/products/noaa-planetary-k-index.json":
