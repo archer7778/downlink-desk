@@ -121,12 +121,32 @@ def run(cfg, force=False, log=print):
         lock.close()
 
 
+def rebuild(cfg, log=print):
+    """Recompute every channel value from the stored decoded fields, using the
+    current channels file. Run after changing units or conversions."""
+    conn = dbm.connect(cfg.db_path)
+    spec = cfg.channels()
+    rows = conn.execute("SELECT id, ts_ms, fields_json FROM frames WHERE decoded_ok=1").fetchall()
+    conn.execute("DELETE FROM points")
+    n = 0
+    for r in rows:
+        pts = decode.channel_points(spec, json.loads(r["fields_json"] or "{}"))
+        conn.executemany("INSERT OR IGNORE INTO points(ts_ms,channel,value,frame_id) VALUES(?,?,?,?)",
+                         [(r["ts_ms"], ch, v, r["id"]) for ch, v in pts])
+        n += len(pts)
+    conn.commit()
+    log(f"Rebuilt {n} channel values from {len(rows)} decoded frames.")
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Fetch telemetry from SatNOGS DB")
     ap.add_argument("--config")
     ap.add_argument("--force", action="store_true", help="fetch now instead of waiting for the interval")
+    ap.add_argument("--rebuild", action="store_true", help="recompute channel values after editing the channels file")
     a = ap.parse_args(argv)
-    sys.exit(run(find_config(a.config), force=a.force))
+    cfg = find_config(a.config)
+    sys.exit(rebuild(cfg) if a.rebuild else run(cfg, force=a.force))
 
 
 if __name__ == "__main__":

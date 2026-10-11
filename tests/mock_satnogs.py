@@ -30,11 +30,17 @@ def ax25(payload):
 
 
 def beacon(band, up_rst, up_tot, boot, mcu, pa, rssi, fwd):
-    p = f"{band},{up_rst},{up_tot},{boot},1,{mcu},{mcu + 3},{pa},{fwd},OM1ABC,{fwd * 2},{fwd * 3},{rssi},-95".encode() + b"\x00"
+    """Temperatures in °C and RSSI in dBm, encoded the way GRBBeta sends them:
+    temperatures in 0.01 °C, signal level as raw where dBm = raw/2 - 134."""
+    raw_rssi = int((rssi + 134) * 2)
+    p = (f"{band},{up_rst},{up_tot},{boot},1,{mcu * 100},{(mcu + 3) * 100},{pa * 100},{fwd},OM1ABC,"
+         f"{fwd * 2},{fwd * 3},{raw_rssi},{raw_rssi + 10}").encode() + b"\x00"
     return ax25(p)
 
 
 def psu(bat_mv, chg, dis, bat_dk, sys_dk, pv1, pv2):
+    # temperatures arrive in tenths of a kelvin here and are re-encoded in 1/128 K steps
+    bat_dk, sys_dk = int(bat_dk / 10 * 128), int(sys_dk / 10 * 128)
     hdr = (2 << 30) | (2 << 25) | (10 << 20) | (10 << 14) | (9 << 8)
     body = struct.pack("<IIIIHII", int(time.time()), 3600, 900000, 7, 1, 55, 0)
     body += struct.pack("<9H", 4800, 4700, 0, 90, 85, 0, pv1, pv2, 0) + bytes([3, 0x7F, 3])
