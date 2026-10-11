@@ -76,6 +76,7 @@ def export(cfg, out, refresh_hours=6, log=print):
             if st:
                 track.append({"t": t, **st})
     _w(api / "now.json", track)
+    _w(api / "track.json", app.ground_track(sat, before_min=50, after_min=(refresh_hours + 2) * 60))
 
     page = (WEB / "index.html").read_text(encoding="utf-8")
     inject = (f'<script>window.DD_STATIC={{"base":"api/","snapshot":{now},"refresh_hours":{refresh_hours},'
@@ -85,6 +86,7 @@ def export(cfg, out, refresh_hours=6, log=print):
                         f"<title>Downlink Desk: live demo with real {sat['name']} data</title>", 1)
     (out / "index.html").write_text(page, encoding="utf-8")
     shutil.copy(WEB / "training.html", out / "training.html")
+    shutil.copy(WEB / "world.json", out / "world.json")
     (out / ".nojekyll").write_text("")
     size = sum(f.stat().st_size for f in out.rglob("*") if f.is_file())
     log(f"Exported {sat['name']} snapshot to {out} ({size / 1e6:.1f} MB) in {time.time() - t0:.1f}s, "

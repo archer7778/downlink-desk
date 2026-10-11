@@ -237,6 +237,11 @@ textarea{width:100%;border:1px solid var(--line);border-radius:5px;background:va
 .card .row{margin-top:auto}
 .biocard{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px 18px;align-items:start}
 .biocard p{margin:0;max-width:72ch}
+/* globe */
+.globe{padding:10px 14px 0;display:flex;justify-content:center}
+.globe canvas{width:100%;max-width:440px;aspect-ratio:1/1;display:block;touch-action:none;cursor:grab}
+.globe-meta{padding:8px 14px 2px;font:12.5px/1.5 var(--f-mono);color:var(--muted);text-align:center;overflow-wrap:anywhere}
+.globe-meta b{color:var(--ink);font-weight:600}
 /* live feed, model, space weather, summary */
 .feed{list-style:none;margin:0;padding:0;max-height:330px;overflow:auto}
 .feed li{display:grid;grid-template-columns:4.6em minmax(0,1fr);gap:2px 10px;padding:7px 14px;border-top:1px solid var(--line);font-size:13px}
@@ -322,6 +327,12 @@ pre.sum{margin:0;padding:12px 14px;font:12.5px/1.6 var(--f-mono);white-space:pre
         </div>
       </div>
       <div class="col">
+        <div class="panel">
+          <div class="ph"><h2>Where it is now</h2><div class="row"><span class="sub">Drag to spin</span><button class="iconbtn" id="globeFollow" aria-pressed="true" title="Keep the satellite centred">Follow</button></div></div>
+          <div class="globe"><canvas id="globe" role="img" aria-label="Globe showing the satellite's position, ground track and heading"></canvas></div>
+          <div class="globe-meta" id="globeMeta">Loading the orbit…</div>
+          <div class="legend"><span><i style="background:var(--accent)"></i>Satellite, arrow shows its heading</span><span><i class="band" style="background:var(--accent);opacity:.9"></i>Next orbit (dashed)</span><span><i class="band" style="background:var(--accent);opacity:.35"></i>Last 45 min</span><span><i style="background:transparent;border:1.5px solid var(--accent)"></i>Area that can hear it</span><span><i class="band" style="background:var(--t4)"></i>Your station</span><span><i class="band" style="background:#000;opacity:.35"></i>Night</span></div>
+        </div>
         <div class="panel">
           <div class="ph"><h2>Alerts</h2><div class="row"><span class="sub" id="alertNote"></span><button class="btn sm" id="ackAll" hidden>Acknowledge all</button></div></div>
           <div class="alerts" id="alerts"></div>
@@ -1051,6 +1062,100 @@ function renderBattery(){
 }
 async function loadBattery(){try{BAT=await api('/api/battery');$('#batTab').hidden=!BAT.available;if(tab==='battery')renderBattery()}catch(e){}}
 
+/* ---------- globe: where the satellite is now ---------- */
+// Orthographic projection drawn on a canvas: graticule, Natural Earth coastlines and borders,
+// the night side, the ground track (past solid, next orbit dashed), the satellite's radio
+// footprint, and its heading. Positions come from SGP4 on the Pi, every 30 s; in between the
+// browser interpolates on the sphere, so the dot moves smoothly.
+const RAD=Math.PI/180,R_E=6371;
+const G={world:null,track:null,rot:[0,20],follow:true,drag:null,idle:null,cv:null,ctx:null,sat:null,raf:0};
+async function loadWorld(){try{G.world=await (await fetch('world.json',{cache:'force-cache'})).json();drawGlobe()}catch(e){}}
+const v3=(lat,lon)=>{const p=lat*RAD,l=lon*RAD;return [Math.cos(p)*Math.cos(l),Math.cos(p)*Math.sin(l),Math.sin(p)]};
+const ll3=v=>{const n=Math.hypot(v[0],v[1],v[2]);return [Math.asin(v[2]/n)/RAD,Math.atan2(v[1],v[0])/RAD]};
+function satAt(t){
+  const P=G.track&&G.track.points;if(!P||P.length<2||t<P[0][0]||t>P[P.length-1][0])return null;
+  let lo=0,hi=P.length-1;while(hi-lo>1){const m=(lo+hi)>>1;if(P[m][0]<=t)lo=m;else hi=m}
+  const a=P[lo],b=P[hi],f=(t-a[0])/((b[0]-a[0])||1),va=v3(a[1],a[2]),vb=v3(b[1],b[2]);
+  const [lat,lon]=ll3([0,1,2].map(i=>va[i]+(vb[i]-va[i])*f));
+  return {t,lat,lon,alt:a[3]+(b[3]-a[3])*f,sunlit:(f<.5?a:b)[4]};
+}
+function bearing(a,b){const p1=a.lat*RAD,p2=b.lat*RAD,dl=(b.lon-a.lon)*RAD;
+  return (Math.atan2(Math.sin(dl)*Math.cos(p2),Math.cos(p1)*Math.sin(p2)-Math.sin(p1)*Math.cos(p2)*Math.cos(dl))/RAD+360)%360}
+const COMPASS=['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+function subsolar(t){ // low-precision solar almanac; plenty for a day/night shade
+  const n=t/86400000+2440587.5-2451545,L=(280.46+.9856474*n)%360,g=(357.528+.9856003*n)%360*RAD;
+  const lam=(L+1.915*Math.sin(g)+.02*Math.sin(2*g))*RAD,eps=(23.439-4e-7*n)*RAD;
+  const ra=Math.atan2(Math.cos(eps)*Math.sin(lam),Math.cos(lam))/RAD,dec=Math.asin(Math.sin(eps)*Math.sin(lam))/RAD;
+  const gmst=(280.46061837+360.98564736629*n)%360;return [dec,((ra-gmst+540)%360)-180];
+}
+function smallCircle(lat0,lon0,r,n){const p0=lat0*RAD,rr=r*RAD,out=[];
+  for(let i=0;i<=n;i++){const th=i/n*2*Math.PI,p=Math.asin(Math.sin(p0)*Math.cos(rr)+Math.cos(p0)*Math.sin(rr)*Math.cos(th));
+    out.push([p/RAD,lon0+Math.atan2(Math.sin(th)*Math.sin(rr)*Math.cos(p0),Math.cos(rr)-Math.sin(p0)*Math.sin(p))/RAD])}return out}
+function drawGlobe(){
+  const cv=G.cv||(G.cv=$('#globe'));if(!cv||cv.offsetParent===null)return;
+  const css=getComputedStyle(document.documentElement),col=k=>css.getPropertyValue(k).trim();
+  const dpr=window.devicePixelRatio||1,W=cv.clientWidth;if(!W)return;
+  if(cv.width!==Math.round(W*dpr)){cv.width=Math.round(W*dpr);cv.height=Math.round(W*dpr)}
+  const c=cv.getContext('2d');c.setTransform(dpr,0,0,dpr,0,0);c.clearRect(0,0,W,W);
+  const now=Date.now(),sat=satAt(now);G.sat=sat;
+  if(G.follow&&sat&&!G.drag){const tl=sat.lon,tp=Math.max(-55,Math.min(55,sat.lat*.7));let d=((tl-G.rot[0]+540)%360)-180;
+    G.rot[0]+=Math.abs(d)>40?d:d*.25;G.rot[1]+=(tp-G.rot[1])*.25}
+  const R=W/2-10,cx=W/2,cy=W/2,l0=G.rot[0],p0=G.rot[1]*RAD,sp0=Math.sin(p0),cp0=Math.cos(p0);
+  const P=(lat,lon)=>{const p=lat*RAD,l=(lon-l0)*RAD,cp=Math.cos(p);return [cx+R*cp*Math.sin(l),cy-R*(cp0*Math.sin(p)-sp0*cp*Math.cos(l)),sp0*Math.sin(p)+cp0*cp*Math.cos(l)]};
+  const line=(pts,close)=>{let on=false;c.beginPath();for(const [la,lo] of pts){const q=P(la,lo);if(q[2]>0){on?c.lineTo(q[0],q[1]):c.moveTo(q[0],q[1]);on=true}else on=false}if(close)c.closePath();c.stroke()};
+  const cap=pts=>{c.beginPath();pts.forEach(([la,lo],i)=>{let q=P(la,lo);if(q[2]<0){const dx=q[0]-cx,dy=q[1]-cy,m=Math.hypot(dx,dy)||1;q=[cx+dx/m*R,cy+dy/m*R]}i?c.lineTo(q[0],q[1]):c.moveTo(q[0],q[1])});c.closePath()};
+  // sphere
+  c.beginPath();c.arc(cx,cy,R,0,2*Math.PI);c.fillStyle=col('--sunk');c.fill();
+  c.save();c.beginPath();c.arc(cx,cy,R,0,2*Math.PI);c.clip();
+  // night side
+  // Night is the half of the globe facing away from the Sun. Draw it as a cap round the anti-solar
+  // point when that point faces us; otherwise as the whole disc minus the daylit cap round the Sun.
+  const [sd,sl]=subsolar(now),anti=P(-sd,sl+180);
+  if(anti[2]>=0)cap(smallCircle(-sd,sl+180,90,180));
+  else{cap(smallCircle(sd,sl,90,180));c.moveTo(cx+R+2,cy);c.arc(cx,cy,R+2,0,2*Math.PI)}
+  c.fillStyle=document.documentElement.matches('[data-theme="dark"]')||matchMedia('(prefers-color-scheme: dark)').matches&&!document.documentElement.matches('[data-theme="light"]')?'rgba(0,0,0,.42)':'rgba(20,35,60,.13)';c.fill('evenodd');
+  // graticule
+  c.lineWidth=.6;c.strokeStyle=col('--line');
+  for(let lo=-180;lo<180;lo+=30){const pts=[];for(let la=-90;la<=90;la+=3)pts.push([la,lo]);line(pts)}
+  for(let la=-60;la<=60;la+=30){const pts=[];for(let lo=-180;lo<=180;lo+=3)pts.push([la,lo]);c.lineWidth=la===0?1.1:.6;line(pts)}
+  // land outlines
+  if(G.world){const draw=(arr,w,a)=>{c.lineWidth=w;c.globalAlpha=a;c.strokeStyle=col('--ink');for(const f of arr){const pts=[];for(let i=0;i<f.length;i+=2)pts.push([f[i+1]/10,f[i]/10]);line(pts)}c.globalAlpha=1};
+    draw(G.world.border,.5,.28);draw(G.world.coast,.9,.75)}
+  // station
+  if(CONF&&CONF.station&&(CONF.station.lat||CONF.station.lon)){const q=P(CONF.station.lat,CONF.station.lon);if(q[2]>0){c.fillStyle=col('--t4');c.fillRect(q[0]-3,q[1]-3,6,6);c.font='11px IBM Plex Sans,system-ui,sans-serif';c.fillText(CONF.station.name||'You',q[0]+6,q[1]+4)}}
+  const T=G.track&&G.track.points;
+  if(T&&sat){
+    const acc=col('--accent');c.strokeStyle=acc;c.lineWidth=1.6;
+    c.globalAlpha=.35;line(T.filter(p=>p[0]<=now&&p[0]>=now-45*MIN).map(p=>[p[1],p[2]]).concat([[sat.lat,sat.lon]]));
+    c.globalAlpha=.9;c.setLineDash([5,4]);line([[sat.lat,sat.lon]].concat(T.filter(p=>p[0]>now&&p[0]<=now+(G.track.period_min||95)*MIN).map(p=>[p[1],p[2]])));c.setLineDash([]);
+    // radio footprint: where on Earth the satellite is above the horizon
+    c.globalAlpha=.55;c.lineWidth=1.2;line(smallCircle(sat.lat,sat.lon,Math.acos(R_E/(R_E+sat.alt))/RAD,90),true);c.globalAlpha=1;
+    const q=P(sat.lat,sat.lon);
+    if(q[2]>0){const ah=satAt(now+90000);if(ah){const qa=P(ah.lat,ah.lon),dx=qa[0]-q[0],dy=qa[1]-q[1],m=Math.hypot(dx,dy);
+        if(m>.5){const ux=dx/m,uy=dy/m,L=26,tx=q[0]+ux*L,ty=q[1]+uy*L;c.strokeStyle=acc;c.fillStyle=acc;c.lineWidth=2;c.beginPath();c.moveTo(q[0],q[1]);c.lineTo(tx,ty);c.stroke();
+          c.beginPath();c.moveTo(tx+ux*7,ty+uy*7);c.lineTo(tx-uy*5,ty+ux*5);c.lineTo(tx+uy*5,ty-ux*5);c.closePath();c.fill()}}
+      c.beginPath();c.arc(q[0],q[1],5.5,0,2*Math.PI);c.fillStyle=acc;c.fill();c.lineWidth=2;c.strokeStyle=col('--panel');c.stroke();
+      c.font='600 12px IBM Plex Sans Condensed,system-ui,sans-serif';c.fillStyle=col('--ink');c.fillText(CONF.satellite.name,q[0]+9,q[1]-8)}
+  }
+  c.restore();c.beginPath();c.arc(cx,cy,R,0,2*Math.PI);c.lineWidth=1;c.strokeStyle=col('--line');c.stroke();
+  // numbers under the globe
+  const meta=$('#globeMeta');
+  if(!sat){meta.textContent=T&&T.length?'Orbit data is out of date; it refreshes with the next fetch.':'Waiting for orbit data from the first fetch.';return}
+  const ah=satAt(now+30000),hd=ah?bearing(sat,ah):null,v=Math.sqrt(398600.4418/(R_E+sat.alt));
+  meta.innerHTML=`<b>${Math.abs(sat.lat).toFixed(2)}°${sat.lat>=0?'N':'S'} ${Math.abs(sat.lon).toFixed(2)}°${sat.lon>=0?'E':'W'}</b> · ${Math.round(sat.alt)} km up · ${v.toFixed(2)} km/s`+(hd!=null?` · heading <b>${Math.round(hd)}° ${COMPASS[Math.round(hd/22.5)%16]}</b>`:'')+` · ${sat.sunlit?'in sunlight':'in Earth’s shadow'}`;
+}
+function globeLoop(){cancelAnimationFrame(G.raf);const step=()=>{drawGlobe();if(G.drag)G.raf=requestAnimationFrame(step)};G.raf=requestAnimationFrame(step)}
+function setupGlobe(){
+  const cv=$('#globe');if(!cv)return;loadWorld();
+  cv.addEventListener('pointerdown',e=>{G.drag={x:e.clientX,y:e.clientY,r:[...G.rot]};G.follow=false;cv.setPointerCapture(e.pointerId);cv.style.cursor='grabbing';globeLoop()});
+  cv.addEventListener('pointermove',e=>{if(!G.drag)return;const k=180/(cv.clientWidth||300);G.rot[0]=G.drag.r[0]-(e.clientX-G.drag.x)*k;G.rot[1]=Math.max(-85,Math.min(85,G.drag.r[1]+(e.clientY-G.drag.y)*k))});
+  const up=()=>{if(!G.drag)return;G.drag=null;cv.style.cursor='';clearTimeout(G.idle);G.idle=setTimeout(()=>{G.follow=true;$('#globeFollow').setAttribute('aria-pressed','true')},12000);$('#globeFollow').setAttribute('aria-pressed','false')};
+  cv.addEventListener('pointerup',up);cv.addEventListener('pointercancel',up);
+  $('#globeFollow').addEventListener('click',()=>{G.follow=!G.follow;$('#globeFollow').setAttribute('aria-pressed',G.follow);drawGlobe()});
+  window.addEventListener('resize',()=>drawGlobe());
+  setInterval(()=>{if(!document.hidden&&!G.drag)drawGlobe()},1000);
+}
+
 /* ---------- main render ---------- */
 let AV_cache={open:[],shelved:[],closed:[]};
 let lastDeriveSig='',lastDeriveT=0,lastTlmSig='';
@@ -1095,6 +1200,7 @@ async function poll(kind){
     if(kind==='passes')PASSES=await api('/api/passes?hours=36');
     if(kind==='obs')OBS=await api('/api/observations?days=3');
     if(kind==='now')NOW=await api('/api/now');
+    if(kind==='track'){G.track=await api('/api/track');drawGlobe()}
     if(kind==='model'){MODEL=await api('/api/model');lastModelSig='';renderModel()}
     if(kind==='sw'){SW=await api('/api/spaceweather?days=7');renderSW(Date.now())}
     if(kind==='sum'){SUM=await api('/api/summary');renderSummary()}
@@ -1113,6 +1219,7 @@ async function boot(){
   buildTlm();
   await Promise.all(['tel','log','health','passes','notes','obs','now','ecl'].map(poll));
   renderAbout();refresh(true);if(tab!=='console')showTab(tab);
+  setupGlobe();poll('track');setInterval(()=>poll('track'),ST?3600000:300000);
   seedFeed();connectStream();loadBattery();setInterval(loadBattery,600000);
   Promise.all(['model','sw','sum'].map(poll)).then(()=>refresh(true));
   setInterval(()=>poll('model'),300000);setInterval(()=>poll('sw'),900000);setInterval(()=>poll('sum'),600000);
@@ -1127,7 +1234,7 @@ async function boot(){
 }
 
 /* ---------- events ---------- */
-function showTab(t){tab=t;$$('nav.tabs button').forEach(b=>b.setAttribute('aria-selected',b.dataset.tab===t));['console','frames','battery','passes','log','handover','about'].forEach(x=>$('#tab-'+x).hidden=x!==t);
+function showTab(t){tab=t;setTimeout(()=>{if(t==='console')drawGlobe()},0);$$('nav.tabs button').forEach(b=>b.setAttribute('aria-selected',b.dataset.tab===t));['console','frames','battery','passes','log','handover','about'].forEach(x=>$('#tab-'+x).hidden=x!==t);
   if(t==='battery'){renderBattery();loadBattery()}
   if(t==='log')renderLog();if(t==='handover')renderHandover();if(t==='passes')renderPasses(Date.now());if(t==='frames')loadFrames(false);if(t==='about')renderAbout();savePrefs()}
 $('nav.tabs').addEventListener('click',e=>{const b=e.target.closest('button');if(b)showTab(b.dataset.tab)});

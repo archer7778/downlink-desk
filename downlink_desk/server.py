@@ -277,6 +277,26 @@ class App:
         return self.cached(("now", sat["norad"]), 15, lambda: now_state(tle["tle1"], tle["tle2"], dbm.now_ms()) or {},
                            tle.get("tle1"))
 
+    def ground_track(self, sat, before_min=50, after_min=100, step_s=30):
+        """Where the satellite was and will be: [t, lat, lon, alt_km, sunlit] every step_s seconds,
+        for the globe's ground track and its moving dot (the browser interpolates between points)."""
+        tle = self._tle(sat)
+        if not tle:
+            return {"points": []}
+
+        def build():
+            from sgp4.api import Satrec
+            from .orbit import period_min, state
+            s = Satrec.twoline2rv(tle["tle1"], tle["tle2"])
+            now = dbm.now_ms() // (step_s * 1000) * step_s * 1000
+            pts = []
+            for t in range(now - before_min * 60_000, now + after_min * 60_000 + 1, step_s * 1000):
+                st = state(s, t)
+                if st:
+                    pts.append([t, st["lat"], st["lon"], st["alt_km"], 1 if st["sunlit"] else 0])
+            return {"now": dbm.now_ms(), "period_min": round(period_min(s), 2), "step_s": step_s, "points": pts}
+        return self.cached(("track", sat["norad"], before_min, after_min), 300, build, tle.get("tle1"))
+
     def health(self, sat):
         n = sat["norad"]
         with self.ro() as c:
@@ -553,6 +573,8 @@ def make_handler(app):
                     return self._json(app.now_state(sat))
                 if p == "/api/battery":
                     return self._json(app.battery(sat))
+                if p == "/api/track":
+                    return self._json(app.ground_track(sat))
                 if p == "/api/model":
                     return self._json(app.model(sat))
                 if p == "/api/profile":

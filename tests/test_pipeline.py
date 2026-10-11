@@ -306,6 +306,9 @@ def test_model_spaceweather_summary_stream():
             json.loads((tmp / "site" / "api" / f"{f}.json").read_text())
         assert json.loads((tmp / "site" / "api" / "health.json").read_text())["storage"] is None
         assert (tmp / "site" / "api" / "profile" / "bat_t.json").exists()
+        tr = json.loads(urllib.request.urlopen("http://127.0.0.1:8771/api/track", timeout=30).read())
+        assert len(tr["points"]) > 250 and all(-90 <= p[1] <= 90 and -180 <= p[2] <= 180 for p in tr["points"])
+        assert (tmp / "site" / "api" / "track.json").exists() and (tmp / "site" / "world.json").exists()
         for path in ("/api/model", "/api/profile?ch=bat_t", "/api/spaceweather", "/api/summary"):
             j = json.loads(urllib.request.urlopen("http://127.0.0.1:8771" + path, timeout=30).read())
             assert "error" not in j, (path, j)
