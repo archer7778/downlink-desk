@@ -46,7 +46,10 @@ def export(cfg, out, refresh_hours=6, log=print):
     _w(api / "satellites.json", [f for f in app.fleet() if f["norad"] == n])
     _w(api / "telemetry.json", app.telemetry(sat, since=now - 8 * DAY))
     health = app.health(sat)
-    health.update(storage=None, update=None, auto_update=False, server_started_ms=now)
+    # The key only exists in the fetch step, and this page has no Pi: report the link as it was
+    # when the data was fetched, and leave out anything about the build machine.
+    health.update(storage=None, update=None, auto_update=False, server_started_ms=now,
+                  token_present=True, auth_error=False)
     _w(api / "health.json", health)
     _w(api / "passes.json", app.passes(sat, 48))
     _w(api / "observations.json", app.observations(sat, 3))
@@ -56,7 +59,8 @@ def export(cfg, out, refresh_hours=6, log=print):
     _w(api / "battery.json", app.battery(sat))
     _w(api / "spaceweather.json", app.spaceweather(7))
     summ = app.summary()
-    summ.update(phone=False)
+    summ.update(phone=False, text="\n".join(l for l in summ.get("text", "").splitlines()
+                                             if not l.startswith(("Pi:", "Software:"))))
     _w(api / "summary.json", summ)
     with app.ro() as c:
         _w(api / "catalog.json", [e for e in entries(c, cfg) if e["norad"] == n])

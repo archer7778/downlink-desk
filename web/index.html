@@ -559,7 +559,7 @@ function derive(now){
       if(gapEnd-a>2*stale)bad(key,'crit',a+2*stale,`No decoded frames for ${ago(Math.min(gapEnd,now)-a)} (since ${fmtDT(a)})`,null);
       if(b)good(key,b,1)}}
   // fetcher health (current only)
-  if(HEALTH){
+  if(HEALTH&&!ST){
     if(!HEALTH.token_present)alerts.push({id:'token@0',key:'token',sev:'crit',sev0:'crit',raised:HEALTH.server_started_ms,cleared:null,msg:'No SatNOGS API key on this Pi yet, so no data can be fetched',first:''});
     else if(HEALTH.auth_error)alerts.push({id:'auth@'+(HEALTH.last_attempt_ms||0),key:'auth',sev:'crit',sev0:'crit',raised:HEALTH.last_attempt_ms||now,cleared:null,msg:'SatNOGS rejected the API key. Check secrets/satnogs_token on the Pi',first:''});
     const lim=3*CONF.poll_minutes*MIN,base=HEALTH.last_ok_ms||HEALTH.server_started_ms;
@@ -722,7 +722,7 @@ function renderContext(now){
   $('#context').innerHTML=parts.join('');
   const lb=$('#livebar');lb.classList.toggle('down',!online);$('#liveText').textContent=ST?`Live demo · real ${CONF.satellite.name} data from SatNOGS · snapshot ${ago(now-ST.snapshot)} old, refreshed every ${ST.refresh_hours} h`:online?`Live · ${CONF.satellite.name} via SatNOGS`:'Lost contact with the Pi · retrying';
   const sb=$('#setupBanner');
-  if(HEALTH&&!HEALTH.token_present){sb.hidden=false;sb.className='banner crit';sb.innerHTML='<b>One step left:</b> put your SatNOGS DB API key in <code>secrets/satnogs_token</code> on the Pi, then press Fetch now. Get the key at db.satnogs.org → your avatar → Settings / API Token.'}
+  if(HEALTH&&!HEALTH.token_present&&!ST){sb.hidden=false;sb.className='banner crit';sb.innerHTML='<b>One step left:</b> put your SatNOGS DB API key in <code>secrets/satnogs_token</code> on the Pi, then press Fetch now. Get the key at db.satnogs.org → your avatar → Settings / API Token.'}
   else if(PASSES&&PASSES.note&&/latitude/.test(PASSES.note)){sb.hidden=false;sb.className='banner warn';sb.textContent='Set your station latitude and longitude in config.toml and restart the server to see passes over you.'}
   else if(ST){if(!sb.dataset.demo){sb.dataset.demo=1;sb.hidden=false;sb.className='banner';sb.innerHTML=`<span><b>You’re looking at a live demo.</b> This is the real Downlink Desk console, showing real telemetry from the CubeSat ${esc(CONF.satellite.name)} received by volunteer SatNOGS stations. A snapshot is rebuilt every ${ST.refresh_hours} hours; on a $15 Raspberry Pi at home it updates every 30 minutes and frames stream in live. Buttons that change things are off here.</span><span class="row"><a class="btn sm primary" href="${ST.repo}">Get it on GitHub</a><a class="btn sm" href="training">Try the simulator</a></span>`}}
   else sb.hidden=true;
@@ -1023,7 +1023,7 @@ function renderSummary(){
   if(!SUM)return;$('#sumText').textContent=SUM.text||'Nothing to report yet.';
   const h=pad(SUM.hour)+':00';
   $('#sumNote').textContent=SUM.phone?(SUM.hour<0?'Daily push is off (summary_hour = -1).':`Pushed to your phone every day at ${h} (${SUM.timezone})${SUM.sent_day?', last sent '+SUM.sent_day:''}. Includes every tracked satellite.`)
-    :'Set ntfy_topic in config.toml to get this on your phone every morning.';
+    :ST?'On a Pi this arrives on your phone every morning through the free ntfy app.':'Set ntfy_topic in config.toml to get this on your phone every morning.';
   $('#sumSend').hidden=!SUM.phone;
 }
 
