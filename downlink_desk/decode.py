@@ -1,5 +1,6 @@
 """Decode raw frames with the SatNOGS community decoders and map fields to channels."""
 import math
+import re
 
 _decoder_mod = None
 
@@ -38,7 +39,27 @@ def clean(fields):
     return out
 
 
+# Protocol plumbing rather than spacecraft health; left out of automatic channels.
+JUNK = re.compile(r"(callsign|ssid|(^|_)ctl$|(^|_)pid$|crc|hbit|csp_hdr|_raw$|message|rpt_|repeater|(^|_)digi_|"
+                  r"_mask$|frame_?type|packet_?type|_spare|reserved|padding)", re.I)
+AUTO_MAX = 80
+
+
+def auto_points(fields):
+    """Every numeric, non-protocol field becomes a channel, in raw units."""
+    out = []
+    for k, v in fields.items():
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or JUNK.search(k):
+            continue
+        out.append((k[:60], float(v)))
+        if len(out) >= AUTO_MAX:
+            break
+    return out
+
+
 def frame_type(spec, fields):
+    if not spec.get("channels"):          # automatic mode: anything with health-like fields counts
+        return "Decoded" if auto_points(fields) else None
     for ft in spec.get("frame_types", []):
         if ft["if_field"] in fields:
             return ft["name"]
@@ -62,6 +83,8 @@ def transform(name, x, ch):
 
 
 def channel_points(spec, fields):
+    if not spec.get("channels"):
+        return auto_points(fields)
     pts = []
     for ch in spec["channels"]:
         for field in ch.get("fields", [ch.get("field")]):

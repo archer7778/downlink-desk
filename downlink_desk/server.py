@@ -18,7 +18,9 @@ from urllib.parse import parse_qs, urlparse
 from . import __version__, logchain
 from . import db as dbm
 from .analysis import observation_report, silent_streak
+from .catalog import channels_for, entries, featured, find
 from .config import find_config
+from .fetch import spec_for
 
 WEB = Path(__file__).resolve().parent.parent / "web"
 STARTED = dbm.now_ms()
@@ -27,98 +29,202 @@ STARTED = dbm.now_ms()
 class App:
     def __init__(self, cfg):
         self.cfg = cfg
-        self.conn = dbm.connect(cfg.db_path)
+        self.conn = dbm.open_db(cfg)
         self.lock = threading.Lock()
-        self.spec = cfg.channels()
-        self._pass_cache = (0, None)
+        self._pass_cache = {}
         self._ecl_cache = {}
+        self._spec_cache = {}
         self._fetching = False
         if not self.conn.execute("SELECT 1 FROM log LIMIT 1").fetchone():
             s = cfg["satellite"]
             logchain.append(self.conn, "system", {"norad": s["norad"]},
                             f"Console commissioned for {s['name']} (NORAD {s['norad']}).", "system")
 
+    # ---------- satellites ----------
+    def sats(self, enabled_only=True):
+        with self.lock:
+            return dbm.satellites(self.conn, enabled_only)
+
+    def sat(self, q):
+        """The satellite a request is about: ?sat=NORAD, else the first one tracked."""
+        rows = self.sats(False)
+        want = q.get("sat")
+        for r in rows:
+            if want and str(r["norad"]) == str(want):
+                return r
+        enabled = [r for r in rows if r["enabled"]]
+        if not enabled and not rows:
+            raise ValueError("no satellites tracked")
+        return (enabled or rows)[0]
+
+    def spec(self, sat):
+        """Curated channels file, or channels built from whatever fields have arrived."""
+        key = sat["norad"]
+        hit = self._spec_cache.get(key)
+        if hit and time.time() - hit[0] < 120:
+            return hit[1]
+        spec = spec_for(self.cfg, sat)
+        if not spec.get("channels"):
+            with self.lock:
+                rows = self.conn.execute("SELECT channel, COUNT(*) n, MAX(ABS(value - CAST(value AS INTEGER))) frac "
+                                         "FROM points WHERE norad=? GROUP BY channel ORDER BY channel", (key,)).fetchall()
+            chans = []
+            for r in rows:
+                head = r["channel"].split("_")[0]
+                chans.append({"id": r["channel"], "sub": head.upper() if len(head) <= 5 else head.capitalize(),
+                              "name": r["channel"].replace("_", " ").capitalize(), "field": r["channel"], "unit": "",
+                              "dp": 2 if (r["frac"] or 0) > 0 else 0, "lim": None,
+                              "counter": "reboot" if ("boot" in r["channel"] or "reset_c" in r["channel"]) and "since" not in r["channel"] else None})
+            spec = {"auto": True, "channels": chans, "frame_types": [{"name": "Decoded", "if_field": ""}],
+                    "notes": "Automatic channels: every numeric field the community decoder produces, in raw units. "
+                             "No limits until you set them (or use Suggest from data). A channels file in channels/ "
+                             "can give them names, units and limits."}
+        self._spec_cache[key] = (time.time(), spec)
+        return spec
+
+    def fleet(self):
+        """Each tracked satellite with a little status, for the picker."""
+        now = dbm.now_ms()
+        out = []
+        feat = {f["norad"]: f for f in featured()}
+        for s in self.sats(False):
+            n = s["norad"]
+            with self.lock:
+                c = self.conn.execute("SELECT MAX(ts_ms) last, SUM(CASE WHEN ts_ms>? THEN 1 ELSE 0 END) day "
+                                      "FROM frames WHERE norad=? AND decoded_ok=1", (now - 86_400_000, n)).fetchone()
+                rep = observation_report(self.conn, self.cfg, now - 3 * 86_400_000, now, n)
+                last_ok = dbm.smeta_get(self.conn, n, "last_ok_ms")
+            streak = silent_streak(rep, self.cfg)
+            nxt = next((o for o in sorted(rep, key=lambda o: o["start"]) if o["end"] > now), None)
+            f = feat.get(n, {})
+            out.append({**s, "last_frame_ms": c["last"], "frames_24h": c["day"] or 0, "last_ok_ms": last_ok,
+                        "silent": len(streak) >= self.cfg["alerts"]["silent_after"],
+                        "next_obs_ms": nxt["start"] if nxt else None,
+                        "bio": f.get("bio", ""), "size": f.get("size", ""), "builder": f.get("builder", ""),
+                        "country": f.get("country", ""), "launched": f.get("launched", ""), "website": f.get("website", "")})
+        return out
+
+    def track(self, norad, cs):
+        with self.lock:
+            e = find(self.conn, self.cfg, norad)
+        if not e:
+            raise ValueError("That satellite isn't in the catalog of decodable satellites on this Pi.")
+        with self.lock:
+            existing = self.conn.execute("SELECT * FROM satellites WHERE norad=?", (norad,)).fetchone()
+            if existing:
+                self.conn.execute("UPDATE satellites SET enabled=1 WHERE norad=?", (norad,))
+            else:
+                self.conn.execute("INSERT INTO satellites(norad,name,decoder,channels,enabled,added_ms) VALUES(?,?,?,?,1,?)",
+                                  (norad, e["name"], e["decoder"], channels_for(e), dbm.now_ms()))
+            self.conn.commit()
+            entry = logchain.append(self.conn, "satellite", {"norad": norad, "action": "track"},
+                                    f"Started tracking {e['name']} (NORAD {norad}).", cs or "system")
+        self._spec_cache.pop(norad, None)
+        return entry
+
+    def untrack(self, norad, cs):
+        with self.lock:
+            row = self.conn.execute("SELECT * FROM satellites WHERE norad=?", (norad,)).fetchone()
+            if not row:
+                raise ValueError("Not tracking that satellite.")
+            if self.conn.execute("SELECT COUNT(*) FROM satellites WHERE enabled=1").fetchone()[0] <= 1 and row["enabled"]:
+                raise ValueError("Keep at least one satellite tracked.")
+            self.conn.execute("UPDATE satellites SET enabled=0 WHERE norad=?", (norad,))
+            self.conn.commit()
+            return logchain.append(self.conn, "satellite", {"norad": norad, "action": "untrack"},
+                                   f"Stopped tracking {row['name']} (NORAD {norad}). Its stored data is kept.", cs or "system")
+
     # ---------- reads ----------
-    def config(self):
+    def config(self, sat):
         c = self.cfg
-        return {"version": __version__, "satellite": c["satellite"], "station": c["station"],
-                "poll_minutes": c["satnogs"]["poll_minutes"], "stale_hours": c["alerts"]["stale_hours"],
+        return {"version": __version__, "satellite": {"norad": sat["norad"], "name": sat["name"], "decoder": sat["decoder"]},
+                "station": c["station"], "poll_minutes": c["satnogs"]["poll_minutes"], "stale_hours": c["alerts"]["stale_hours"],
                 "alerts": c["alerts"], "phone_alerts": bool(str(c["notify"].get("ntfy_topic") or "").strip()),
-                "write_protected": bool(c["server"]["write_passcode"]), "spec": self.spec,
+                "write_protected": bool(c["server"]["write_passcode"]), "spec": self.spec(sat),
+                "default_norad": int(c["satellite"]["norad"]),
                 "commissioned_ms": self.conn.execute("SELECT MIN(t_ms) m FROM log").fetchone()["m"]}
 
-    def telemetry(self, since):
+    def telemetry(self, sat, since):
+        n = sat["norad"]
         with self.lock:
-            pts = self.conn.execute("SELECT ts_ms,channel,value FROM points WHERE ts_ms>? ORDER BY ts_ms LIMIT 50000",
-                                    (since,)).fetchall()
-            frs = self.conn.execute("SELECT id,ts_ms,observer,frame_type,decoded_ok,sunlit FROM frames WHERE ts_ms>? ORDER BY ts_ms LIMIT 20000",
-                                    (since,)).fetchall()
+            pts = self.conn.execute("SELECT ts_ms,channel,value FROM points WHERE norad=? AND ts_ms>? ORDER BY ts_ms LIMIT 60000",
+                                    (n, since)).fetchall()
+            frs = self.conn.execute("SELECT id,ts_ms,observer,frame_type,decoded_ok,sunlit FROM frames WHERE norad=? AND ts_ms>? "
+                                    "ORDER BY ts_ms LIMIT 20000", (n, since)).fetchall()
         return {"now": dbm.now_ms(), "points": [[r[0], r[1], r[2]] for r in pts],
                 "frames": [[r[0], r[1], r[2], r[3], r[4], r[5]] for r in frs]}
 
-    def frames(self, limit, before):
+    def frames(self, sat, limit, before):
         with self.lock:
             rows = self.conn.execute(
                 "SELECT id,ts_ms,observer,station_id,app_source,frame_type,decoded_ok,fields_json,frame_hex,sunlit,sub_lat,sub_lon FROM frames"
-                " WHERE ts_ms<? ORDER BY ts_ms DESC LIMIT ?", (before, limit)).fetchall()
+                " WHERE norad=? AND ts_ms<? ORDER BY ts_ms DESC LIMIT ?", (sat["norad"], before, limit)).fetchall()
         return [{"id": r["id"], "t": r["ts_ms"], "observer": r["observer"], "station_id": r["station_id"],
                  "app_source": r["app_source"], "type": r["frame_type"], "ok": bool(r["decoded_ok"]),
                  "fields": json.loads(r["fields_json"] or "{}"), "hex": r["frame_hex"],
                  "sunlit": r["sunlit"], "sub_lat": r["sub_lat"], "sub_lon": r["sub_lon"]} for r in rows]
 
-    def observations(self, days):
+    def observations(self, sat, days):
         now = dbm.now_ms()
         with self.lock:
-            rep = observation_report(self.conn, self.cfg, now - days * 86_400_000, now)
-            refreshed = dbm.meta_get(self.conn, "obs_refreshed_ms")
+            rep = observation_report(self.conn, self.cfg, now - days * 86_400_000, now, sat["norad"])
+            refreshed = dbm.smeta_get(self.conn, sat["norad"], "obs_refreshed_ms")
         streak = silent_streak(rep, self.cfg)
         return {"now": now, "observations": rep, "refreshed_ms": refreshed,
                 "silent_streak": [o["id"] for o in streak], "silent_after": self.cfg["alerts"]["silent_after"]}
 
-    def eclipses(self, since, until):
-        key = (since // 1800_000, until // 1800_000)
+    def _tle(self, sat):
+        with self.lock:
+            return dbm.smeta_get(self.conn, sat["norad"], "tle")
+
+    def eclipses(self, sat, since, until):
+        key = (sat["norad"], since // 1800_000, until // 1800_000)
         if key in self._ecl_cache:
             return self._ecl_cache[key]
-        with self.lock:
-            tle = dbm.meta_get(self.conn, "tle")
+        tle = self._tle(sat)
         out = {"eclipses": []}
         if tle:
             from .orbit import eclipses
             out["eclipses"] = eclipses(tle["tle1"], tle["tle2"], since, until, 60)
-        self._ecl_cache = {key: out}
+        self._ecl_cache = {k: v for k, v in self._ecl_cache.items() if k[0] != sat["norad"]}
+        self._ecl_cache[key] = out
         return out
 
-    def now_state(self):
-        with self.lock:
-            tle = dbm.meta_get(self.conn, "tle")
+    def now_state(self, sat):
+        tle = self._tle(sat)
         if not tle:
             return {}
         from .orbit import now_state
         return now_state(tle["tle1"], tle["tle2"], dbm.now_ms()) or {}
 
-    def health(self):
+    def health(self, sat):
+        n = sat["norad"]
         with self.lock:
             g = lambda k, d=None: dbm.meta_get(self.conn, k, d)
-            fetches = [dict(r) for r in self.conn.execute("SELECT * FROM fetches ORDER BY id DESC LIMIT 60")]
-            counts = self.conn.execute("SELECT COUNT(*) n, MAX(ts_ms) last, SUM(decoded_ok) ok FROM frames").fetchone()
+            fetches = [dict(r) for r in self.conn.execute("SELECT * FROM fetches WHERE norad=? OR norad IS NULL "
+                                                         "ORDER BY id DESC LIMIT 60", (n,))]
+            counts = self.conn.execute("SELECT COUNT(*) n, MAX(ts_ms) last, SUM(decoded_ok) ok FROM frames WHERE norad=?",
+                                       (n,)).fetchone()
+            tle = dbm.smeta_get(self.conn, n, "tle") or {}
+            satmeta = dbm.smeta_get(self.conn, n, "satellite") or {}
+            last_attempt = dbm.smeta_get(self.conn, n, "last_attempt_ms")
+            last_ok = dbm.smeta_get(self.conn, n, "last_ok_ms")
         try:
             size = self.cfg.db_path.stat().st_size
         except OSError:
             size = 0
-        tle = g("tle") or {}
-        return {"now": dbm.now_ms(), "server_started_ms": STARTED, "last_attempt_ms": g("last_attempt_ms"),
-                "last_ok_ms": g("last_ok_ms"), "auth_error": bool(g("auth_error", False)),
+        return {"now": dbm.now_ms(), "server_started_ms": STARTED, "last_attempt_ms": last_attempt,
+                "last_ok_ms": last_ok, "auth_error": bool(g("auth_error", False)),
                 "token_present": bool(self.cfg.token), "fetches": fetches,
                 "frames_total": counts["n"], "frames_decoded": counts["ok"] or 0, "last_frame_ms": counts["last"],
-                "db_bytes": size, "tle_epoch_ms": tle.get("epoch_ms"), "satellite": g("satellite") or {},
+                "db_bytes": size, "tle_epoch_ms": tle.get("epoch_ms"), "satellite": satmeta,
                 "fetching": self._fetching}
 
-    def passes(self, hours):
-        cached_t, cached = self._pass_cache
-        if cached and time.time() - cached_t < 600 and cached["hours"] >= hours:
-            return cached
-        with self.lock:
-            tle = dbm.meta_get(self.conn, "tle")
+    def passes(self, sat, hours):
+        cached = self._pass_cache.get(sat["norad"])
+        if cached and time.time() - cached[0] < 600 and cached[1]["hours"] >= hours:
+            return cached[1]
+        tle = self._tle(sat)
         st = self.cfg["station"]
         out = {"hours": hours, "station": st, "passes": [], "tle_epoch_ms": None, "note": ""}
         if not tle:
@@ -131,25 +237,28 @@ class App:
             out["passes"] = passes(tle["tle1"], tle["tle2"], start, hours + 1, st["lat"], st["lon"],
                                    st.get("alt_m", 0), st.get("min_elevation", 10))
             out["tle_epoch_ms"] = tle.get("epoch_ms")
-        self._pass_cache = (time.time(), out)
+        self._pass_cache[sat["norad"]] = (time.time(), out)
         return out
 
-    def fetch_now(self):
+    def fetch_now(self, sat=None):
         if self._fetching:
             return False, "A fetch is already running."
-        last = dbm.meta_get(self.conn, "last_attempt_ms", 0) or 0
-        if dbm.now_ms() - last < 120_000:
+        with self.lock:
+            last = dbm.smeta_get(self.conn, sat["norad"], "last_attempt_ms", 0) if sat else dbm.meta_get(self.conn, "last_attempt_ms", 0)
+            never_ok = bool(sat) and dbm.smeta_get(self.conn, sat["norad"], "last_ok_ms") is None
+        if dbm.now_ms() - (last or 0) < 120_000 and not never_ok:
             return False, "Fetched less than two minutes ago. SatNOGS is volunteer-run, so give it a moment."
 
         def work():
             self._fetching = True
             try:
                 from .fetch import run
-                run(self.cfg, force=True, log=lambda m: None)
+                run(self.cfg, force=True, log=lambda m: None, only=sat["norad"] if sat else None)
             finally:
                 self._fetching = False
+                self._spec_cache.clear()
         threading.Thread(target=work, daemon=True).start()
-        return True, "Fetching from SatNOGS now."
+        return True, f"Fetching {sat['name'] if sat else 'all satellites'} from SatNOGS now."
 
 
 def make_handler(app):
@@ -193,24 +302,31 @@ def make_handler(app):
             q = {k: v[0] for k, v in parse_qs(u.query).items()}
             p = u.path
             try:
+                if p == "/api/satellites":
+                    return self._json(app.fleet())
+                if p == "/api/catalog":
+                    with app.lock:
+                        return self._json(entries(app.conn, app.cfg))
+                if p.startswith("/api/") and p not in ("/api/log", "/api/log/verify", "/api/notes", "/api/export/log.json"):
+                    sat = app.sat(q)
                 if p == "/api/config":
-                    return self._json(app.config())
+                    return self._json(app.config(sat))
                 if p == "/api/telemetry":
-                    return self._json(app.telemetry(int(q.get("since", dbm.now_ms() - 7 * 86_400_000))))
+                    return self._json(app.telemetry(sat, int(q.get("since", dbm.now_ms() - 7 * 86_400_000))))
                 if p == "/api/frames":
-                    return self._json(app.frames(min(int(q.get("limit", 100)), 500), int(q.get("before", 2**53))))
+                    return self._json(app.frames(sat, min(int(q.get("limit", 100)), 500), int(q.get("before", 2**53))))
                 if p == "/api/health":
-                    return self._json(app.health())
+                    return self._json(app.health(sat))
                 if p == "/api/passes":
-                    return self._json(app.passes(min(float(q.get("hours", 36)), 72)))
+                    return self._json(app.passes(sat, min(float(q.get("hours", 36)), 72)))
                 if p == "/api/observations":
-                    return self._json(app.observations(min(float(q.get("days", 3)), 14)))
+                    return self._json(app.observations(sat, min(float(q.get("days", 3)), 14)))
                 if p == "/api/eclipses":
                     now = dbm.now_ms()
                     since = max(int(q.get("since", now - 7 * 86_400_000)), now - 14 * 86_400_000)
-                    return self._json(app.eclipses(since, min(int(q.get("until", now)), now + 86_400_000)))
+                    return self._json(app.eclipses(sat, since, min(int(q.get("until", now)), now + 86_400_000)))
                 if p == "/api/now":
-                    return self._json(app.now_state())
+                    return self._json(app.now_state(sat))
                 if p == "/api/log":
                     with app.lock:
                         return self._json(logchain.entries(app.conn, int(q.get("after", 0))))
@@ -221,7 +337,7 @@ def make_handler(app):
                     with app.lock:
                         return self._json(dbm.meta_get(app.conn, "notes", {"text": "", "cs": "", "t": 0}))
                 if p == "/api/export/telemetry.csv":
-                    return self._text(export_csv(app), "text/csv", "telemetry.csv")
+                    return self._text(export_csv(app, sat), "text/csv", f"{sat['name']}-telemetry.csv")
                 if p == "/api/export/log.json":
                     with app.lock:
                         data = {"satellite": app.cfg["satellite"], "exported_ms": dbm.now_ms(),
@@ -232,7 +348,9 @@ def make_handler(app):
                 return self._json({"error": str(e)}, 400)
 
         def do_POST(self):
-            p = urlparse(self.path).path
+            u = urlparse(self.path)
+            p = u.path
+            q = {k: v[0] for k, v in parse_qs(u.query).items()}
             if not self._authorised():
                 return self._json({"error": "This console needs the operator passcode for changes."}, 401)
             try:
@@ -249,8 +367,13 @@ def make_handler(app):
                                                          "t": dbm.now_ms()})
                     return self._json({"ok": True})
                 if p == "/api/fetch":
-                    ok, msg = app.fetch_now()
+                    ok, msg = app.fetch_now(app.sat(q) if q.get("sat") else None)
                     return self._json({"ok": ok, "message": msg}, 202 if ok else 429)
+                if p == "/api/satellites/track":
+                    e = app.track(int(body.get("norad", 0)), str(body.get("cs", ""))[:16])
+                    return self._json(e, 201)
+                if p == "/api/satellites/untrack":
+                    return self._json(app.untrack(int(body.get("norad", 0)), str(body.get("cs", ""))[:16]))
                 return self._json({"error": "not found"}, 404)
             except ValueError as e:
                 return self._json({"error": str(e)}, 400)
@@ -274,11 +397,11 @@ def make_handler(app):
     return H
 
 
-def export_csv(app):
-    ids = [c["id"] for c in app.spec["channels"]]
+def export_csv(app, sat):
+    ids = [c["id"] for c in app.spec(sat)["channels"]]
     with app.lock:
         rows = app.conn.execute("SELECT f.ts_ms, f.observer, f.frame_type, p.channel, p.value FROM frames f"
-                                " JOIN points p ON p.frame_id=f.id ORDER BY f.ts_ms").fetchall()
+                                " JOIN points p ON p.frame_id=f.id WHERE f.norad=? ORDER BY f.ts_ms", (sat["norad"],)).fetchall()
     by = {}
     for t, obs, ft, ch, v in rows:
         by.setdefault((t, obs, ft), {})[ch] = v

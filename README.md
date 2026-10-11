@@ -10,6 +10,7 @@ Downlink Desk pulls real telemetry for a satellite from the [SatNOGS](https://sa
 - **Orbit context:** every frame is tagged sunlit or eclipse with the satellite's position, charts shade eclipses, and the console shows where the satellite is right now
 - **Learned limits:** one click proposes caution and alarm limits from the satellite's own history, for the operator to review and sign
 - **Phone alerts** through the free ntfy app: alarms, restarts, silence and fetch failures
+- **Several satellites at once:** a picker in the header switches between tracked satellites, each with its own history, alerts, limits and schedule; a catalog browser with bios adds more
 - **Restart detection** from the spacecraft's own boot counters
 - **Acknowledge and shelve** alerts, with a reason, under your call sign
 - **A signed audit trail**: every operator action is hash-chained on the Pi, so edits or deletions show up on verify
@@ -37,7 +38,7 @@ volunteer SatNOGS stations ──► SatNOGS DB ──► Pi: fetch job (every 3
 - Sunlight and position come from the latest orbit data (SGP4 plus a cylindrical Earth-shadow model).
 - Alerts are worked out in the browser from the stored telemetry, so every viewer sees the same thing. Phone alerts are checked by the fetch job on the Pi.
 
-The default satellite is **GRBBeta** (NORAD 60237), a 1U CubeSat from the Technical University of Košice carrying a gamma-ray burst detector. Point it at another satellite by changing `[satellite]` in `config.toml` and writing a channels file for its decoder.
+The first satellite is **GRBBeta** (NORAD 60237), a 2U CubeSat from the Technical University of Košice testing a gamma-ray detector. Track more from the **satellite picker** in the console header: it lists every satellite in orbit that SatNOGS can decode, with hand-written bios for a featured few (CroCube, Foresail-1p, CatSat, CubeBel-2, Sharjahsat-1, UWE-4). Satellites without a curated channels file get automatic channels: every numeric field the decoder produces, in raw units.
 
 ## Install on a Raspberry Pi
 

@@ -7,7 +7,7 @@ import threading
 
 from .db import now_ms
 
-KINDS = {"ack", "shelve", "unshelve", "check", "note", "duty", "handover", "equip", "limits", "system"}
+KINDS = {"ack", "shelve", "unshelve", "check", "note", "duty", "handover", "equip", "limits", "system", "satellite"}
 GENESIS = "genesis"
 _lock = threading.Lock()
 

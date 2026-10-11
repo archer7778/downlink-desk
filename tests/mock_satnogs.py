@@ -123,6 +123,9 @@ def make_observations(frames, now=None, seed=11):
 def serve(port, token="test-token", page_size=25, require_token=True):
     frames = make_frames()
     observations = make_observations(frames)
+    # a second, made-up satellite with the same frame format, for automatic-channel tests
+    shifted = [{**f, "norad_cat_id": 99999, "timestamp": f["timestamp"][:-3] + "%02dZ" % ((int(f["timestamp"][-3:-1]) + 7) % 60)}
+               for f in frames]
     state = {"requests": 0}
 
     class H(BaseHTTPRequestHandler):
@@ -146,9 +149,22 @@ def serve(port, token="test-token", page_size=25, require_token=True):
                 return self._json([{"tle0": "0 GRBBETA", "tle1": TLE[0], "tle2": TLE[1], "tle_source": "mock",
                                     "norad_cat_id": 60237, "updated": "2026-10-11T03:24:03Z"}])
             if u.path == "/api/satellites/":
-                return self._json([{"sat_id": "FVZM-4350-0869-7957-1010", "norad_cat_id": 60237, "name": "GRBBeta",
-                                    "status": "alive", "is_frequency_violator": False}])
+                cat = [{"sat_id": "FVZM-4350-0869-7957-1010", "norad_cat_id": 60237, "name": "GRBBeta", "status": "alive",
+                        "is_frequency_violator": False, "telemetries": [{"decoder": "grbbeta"}], "decayed": None,
+                        "countries": "SK", "launched": "2024-07-09T19:00:00Z", "website": "https://grbbeta.tuke.sk/"},
+                       {"norad_cat_id": 99999, "name": "TESTSAT", "status": "alive", "telemetries": [{"decoder": "grbbeta"}],
+                        "decayed": None, "countries": "XX", "launched": "2026-01-01T00:00:00Z", "is_frequency_violator": False},
+                       {"norad_cat_id": 43880, "name": "UWE-4", "status": "alive", "telemetries": [{"decoder": "uwe4"}],
+                        "decayed": None, "countries": "DE", "launched": "2018-12-27T00:00:00Z"},
+                       {"norad_cat_id": 47959, "name": "GRBAlpha", "status": "re-entered", "telemetries": [{"decoder": "grbalpha"}],
+                        "decayed": "2025-06-09T19:53:00Z"},
+                       {"norad_cat_id": 11111, "name": "NODECODER", "status": "alive", "telemetries": [], "decayed": None}]
+                if "norad_cat_id" in q:
+                    cat = [c for c in cat if str(c["norad_cat_id"]) == q["norad_cat_id"]]
+                return self._json(cat)
             if u.path == "/api/observations/":
+                if q.get("norad_cat_id", "60237") != "60237":
+                    return self._json([])
                 page = int(q.get("page", 1))
                 return self._json(observations[(page - 1) * 25: page * 25])
             if u.path == "/api/telemetry/":
@@ -156,9 +172,11 @@ def serve(port, token="test-token", page_size=25, require_token=True):
                     return self._json({"detail": "Authentication credentials were not provided."}, 401)
                 if "satellite" not in q and "cursor" not in q:
                     return self._json({"detail": "satellite is required"}, 400)
+                sat = q.get("satellite") or q.get("sat", "60237")
+                src = frames if sat == "60237" else shifted if sat == "99999" else []
                 start = int(q.get("cursor", 0))
-                page = frames[start:start + page_size]
-                nxt = f"{base}/api/telemetry/?cursor={start + page_size}" if start + page_size < len(frames) else None
+                page = src[start:start + page_size]
+                nxt = f"{base}/api/telemetry/?cursor={start + page_size}&sat={sat}" if start + page_size < len(src) else None
                 return self._json({"next": nxt, "previous": None, "results": page})
             self._json({"detail": "not found"}, 404)
 

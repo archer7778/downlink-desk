@@ -38,13 +38,18 @@ def _once(conn, key):
     return True
 
 
-def after_fetch(conn, cfg, spec, new_ids, log=print):
+def after_fetch(conn, cfg, spec, new_ids, log=print, sat_row=None):
     """Look at what this fetch brought in and push anything an operator should hear about."""
     if not str(cfg["notify"].get("ntfy_topic") or "").strip():
         return
-    sat = cfg["satellite"]["name"]
+    sat_row = sat_row or {"norad": int(cfg["satellite"]["norad"]), "name": cfg["satellite"]["name"]}
+    norad, sat = sat_row["norad"], sat_row["name"]
     chans = {c["id"]: c for c in spec["channels"]}
-    lims = limits_in_force(conn, spec)
+    if not chans:   # automatic channels: no units or limits, but restarts can still be spotted by name
+        chans = {k: {"id": k, "name": k.replace("_", " "), "dp": 0, "unit": "",
+                     "counter": "reboot" if ("boot" in k or "reset_c" in k) and "since" not in k else None}
+                 for (k,) in conn.execute("SELECT DISTINCT channel FROM points WHERE norad=?", (norad,))}
+    lims = limits_in_force(conn, spec, norad, int(cfg["satellite"]["norad"]))
     sent = 0
     if new_ids:
         q = ",".join("?" * len(new_ids))
@@ -61,23 +66,23 @@ def after_fetch(conn, cfg, spec, new_ids, log=print):
             if lim:
                 rl, _, _, rh = lim
                 if (rl is not None and v < rl) or (rh is not None and v > rh):
-                    if _once(conn, f"lim:{ch}:{t // 3600_000}"):
+                    if _once(conn, f"lim:{norad}:{ch}:{t // 3600_000}"):
                         send(cfg, f"{sat}: ALARM {c['name']}", f"{c['name']} = {v:.{c['dp']}f} {c['unit']} "
                              f"(alarm limits {rl} / {rh}).", "high", "rotating_light")
                         sent += 1
             if c.get("counter") == "reboot":
                 if ch not in prev:
-                    p = conn.execute("SELECT value FROM points WHERE channel=? AND ts_ms<? ORDER BY ts_ms DESC LIMIT 1",
-                                     (ch, first_ts)).fetchone()
+                    p = conn.execute("SELECT value FROM points WHERE norad=? AND channel=? AND ts_ms<? ORDER BY ts_ms DESC LIMIT 1",
+                                     (norad, ch, first_ts)).fetchone()
                     prev[ch] = p["value"] if p else None
-                if prev[ch] is not None and v > prev[ch] and _once(conn, f"reboot:{ch}:{t}"):
+                if prev[ch] is not None and v > prev[ch] and _once(conn, f"reboot:{norad}:{ch}:{t}"):
                     send(cfg, f"{sat}: restart detected", f"{c['name']} went from {prev[ch]:.0f} to {v:.0f}.",
                          "default", "arrows_counterclockwise")
                     sent += 1
                 prev[ch] = v
-    report = observation_report(conn, cfg, dbm.now_ms() - 3 * 86_400_000, dbm.now_ms())
+    report = observation_report(conn, cfg, dbm.now_ms() - 3 * 86_400_000, dbm.now_ms(), norad)
     streak = silent_streak(report, cfg)
-    if len(streak) >= cfg["alerts"]["silent_after"] and _once(conn, f"silent:{streak[0]['id']}"):
+    if len(streak) >= cfg["alerts"]["silent_after"] and _once(conn, f"silent:{norad}:{streak[0]['id']}"):
         names = ", ".join(sorted({o["station"] for o in streak}))
         send(cfg, f"{sat}: may have gone silent", f"{len(streak)} scheduled SatNOGS observations in a row "
              f"produced no frames (stations: {names}).", "high", "satellite")

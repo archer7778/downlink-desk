@@ -59,6 +59,14 @@ CREATE TABLE IF NOT EXISTS observations (
   fetched_ms INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS observations_end ON observations (end_ms);
+CREATE TABLE IF NOT EXISTS satellites (
+  norad INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  decoder TEXT NOT NULL,
+  channels TEXT NOT NULL DEFAULT '',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  added_ms INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS meta (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -85,6 +93,46 @@ def connect(path):
     return conn
 
 
+PER_SAT_META = ("tle", "satellite", "last_attempt_ms", "last_ok_ms", "auth_error", "meta_refreshed_ms",
+                "obs_refreshed_ms")
+
+
+def migrate(conn, cfg):
+    """Bring a single-satellite (v0.1/v0.2) database up to multi-satellite form, once.
+    Existing rows belong to the satellite in config.toml."""
+    s = cfg["satellite"]
+    norad = int(s["norad"])
+    for t in ("frames", "points", "observations", "fetches"):
+        if "norad" not in {r[1] for r in conn.execute(f"PRAGMA table_info({t})")}:
+            conn.execute(f"ALTER TABLE {t} ADD COLUMN norad INTEGER")
+            conn.execute(f"UPDATE {t} SET norad=?", (norad,))
+    conn.execute("CREATE INDEX IF NOT EXISTS frames_sat_ts ON frames (norad, ts_ms)")
+    conn.execute("CREATE INDEX IF NOT EXISTS points_sat_ts ON points (norad, ts_ms)")
+    conn.execute("CREATE INDEX IF NOT EXISTS obs_sat_end ON observations (norad, end_ms)")
+    if not conn.execute("SELECT 1 FROM satellites LIMIT 1").fetchone():
+        conn.execute("INSERT INTO satellites(norad,name,decoder,channels,enabled,added_ms) VALUES(?,?,?,?,1,?)",
+                     (norad, s["name"], s["decoder"], s.get("channels", ""), now_ms()))
+    for k in PER_SAT_META:
+        old = conn.execute("SELECT value FROM meta WHERE key=?", (k,)).fetchone()
+        if old and not conn.execute("SELECT 1 FROM meta WHERE key=?", (f"{k}:{norad}",)).fetchone():
+            conn.execute("INSERT INTO meta(key,value) VALUES(?,?)", (f"{k}:{norad}", old["value"]))
+            conn.execute("DELETE FROM meta WHERE key=?", (k,))
+    conn.commit()
+
+
+def satellites(conn, enabled_only=True):
+    q = "SELECT * FROM satellites" + (" WHERE enabled=1" if enabled_only else "") + " ORDER BY added_ms"
+    return [dict(r) for r in conn.execute(q)]
+
+
+def smeta_get(conn, norad, key, default=None):
+    return meta_get(conn, f"{key}:{norad}", default)
+
+
+def smeta_set(conn, norad, key, value):
+    meta_set(conn, f"{key}:{norad}", value)
+
+
 def meta_get(conn, key, default=None):
     row = conn.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
     if row is None:
@@ -101,8 +149,14 @@ def meta_set(conn, key, value):
     conn.commit()
 
 
-def record_fetch(conn, ok, status, seen, new, message):
-    conn.execute("INSERT INTO fetches(t_ms,ok,http_status,frames_seen,frames_new,message) VALUES(?,?,?,?,?,?)",
-                 (now_ms(), 1 if ok else 0, status, seen, new, message[:500]))
+def record_fetch(conn, ok, status, seen, new, message, norad=None):
+    conn.execute("INSERT INTO fetches(t_ms,ok,http_status,frames_seen,frames_new,message,norad) VALUES(?,?,?,?,?,?,?)",
+                 (now_ms(), 1 if ok else 0, status, seen, new, message[:500], norad))
     conn.execute("DELETE FROM fetches WHERE id NOT IN (SELECT id FROM fetches ORDER BY id DESC LIMIT 500)")
     conn.commit()
+
+
+def open_db(cfg):
+    conn = connect(cfg.db_path)
+    migrate(conn, cfg)
+    return conn

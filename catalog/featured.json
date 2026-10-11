@@ -1,0 +1,33 @@
+{
+  "notes": "Hand-written bios for satellites that work well with Downlink Desk. Facts from each team's site, SatNOGS DB and Gunter's Space Page; checked October 2026.",
+  "satellites": [
+    {"norad": 60237, "name": "GRBBeta", "decoder": "grbbeta", "channels": "channels/grbbeta.json",
+     "size": "2U CubeSat", "builder": "Technical University of Košice", "country": "Slovakia, with Hungary",
+     "launched": "2024-07-09", "website": "https://grbbeta.tuke.sk/",
+     "bio": "Tests a small gamma-ray detector and electronics for CAMELOT, a planned constellation for spotting gamma-ray bursts. Successor to GRBAlpha, which re-entered in 2025. Carries UHF and VHF beacons, a CW beacon and an amateur digipeater. Launched on Ariane 6's first flight."},
+    {"norad": 62394, "name": "CroCube", "decoder": "crocube",
+     "size": "1U CubeSat", "builder": "Društvo EVO with Spacemanic", "country": "Croatia",
+     "launched": "2024-12-21", "website": "https://crocube.hr",
+     "bio": "Croatia's first satellite, partly crowdfunded. A single-unit CubeSat built to grow Croatian space and STEM skills, it has sent back camera images of its home country."},
+    {"norad": 66778, "name": "Foresail-1p", "decoder": "foresail1p",
+     "size": "3U CubeSat", "builder": "Aalto University, FORESAIL consortium", "country": "Finland",
+     "launched": "2025-11-28", "website": "https://foresail.github.io/",
+     "bio": "A second attempt after the original Foresail-1 failed. Carries a particle telescope for studying space radiation and a plasma brake: a charged tether that drags against the ionosphere to lower the orbit, a possible cheap way to clear dead satellites."},
+    {"norad": 60246, "name": "CatSat", "decoder": "catsat",
+     "size": "6U CubeSat", "builder": "University of Arizona students", "country": "United States",
+     "launched": "2024-07-04", "website": "https://catsat.arizona.edu/",
+     "bio": "A student-built satellite testing an inflatable antenna, studying charged particles in the upper atmosphere and photographing Earth."},
+    {"norad": 57175, "name": "CubeBel-2", "decoder": "cubebel2",
+     "size": "3U CubeSat", "builder": "Belarusian State University", "country": "Belarus",
+     "launched": "2023-06-27", "website": "https://bsusat.com/",
+     "bio": "Also called BSUSat-2. A teaching and research platform built by students and young scientists, with two multispectral Earth-observation cameras and an amateur radio digipeater. Its beacon is one of the richest on SatNOGS, with dozens of decoded fields."},
+    {"norad": 55104, "name": "Sharjahsat-1", "decoder": "sharjahsat1",
+     "size": "3U CubeSat", "builder": "University of Sharjah", "country": "United Arab Emirates",
+     "launched": "2023-01-03", "website": "https://www.sharjah.ac.ae/ssah",
+     "bio": "A University of Sharjah CubeSat carrying an improved X-ray detector for observing bright X-ray sources in the sky. Heard often by volunteer stations."},
+    {"norad": 43880, "name": "UWE-4", "decoder": "uwe4",
+     "size": "1U CubeSat", "builder": "University of Würzburg", "country": "Germany",
+     "launched": "2018-12-27", "website": "https://www.informatik.uni-wuerzburg.de/space/",
+     "bio": "A veteran in orbit since 2018. Became the first 1U CubeSat to show it could steer its own orbit, using tiny electric thrusters. Still transmitting years after launch."}
+  ]
+}

@@ -58,6 +58,14 @@ On any device on the same network: `http://groundpi.local:8080`. The first fetch
 | Update Downlink Desk | `cd ~/downlink-desk && git pull && ./deploy/install.sh` |
 | Back up | copy `~/downlink-desk/data/downlink-desk.db` somewhere else |
 
+## Tracking more satellites
+
+Click the satellite name at the top left of the console, then **Track another satellite**. Featured satellites have bios; the full list (everything in orbit that the installed decoders understand) downloads from SatNOGS once a day with the regular fetch. Tracking a satellite is signed in the audit trail and its data starts arriving within a couple of minutes.
+
+Each tracked satellite adds a few requests to SatNOGS per fetch cycle. A handful is fine; please don't track dozens on a 20-minute cycle.
+
+To give an automatic satellite proper names, units and limits, copy `channels/grbbeta.json` to `channels/<decoder>.json`, edit it, set the `channels` column for that satellite, and run `--rebuild`.
+
 ## Phone alerts (optional)
 
 1. Install the free **ntfy** app (Android or iOS).
