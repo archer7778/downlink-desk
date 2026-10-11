@@ -47,7 +47,8 @@ if [ ! -s secrets/satnogs_token ]; then
 fi
 
 say "4/5  Installing background services"
-for unit in downlink-desk-web.service downlink-desk-fetch.service downlink-desk-fetch.timer; do
+for unit in downlink-desk-web.service downlink-desk-fetch.service downlink-desk-fetch.timer \
+            downlink-desk-update.service downlink-desk-update.timer; do
   sed -e "s#@ROOT@#${ROOT}#g" -e "s#@USER@#${USER_NAME}#g" "deploy/${unit}" | sudo tee "/etc/systemd/system/${unit}" >/dev/null
 done
 cfgval() { awk -F= -v k="$1" '$1 ~ "^"k"[ ]*$" {sub(/#.*/,"",$2); gsub(/[ "]/,"",$2); print $2; exit}' config.toml; }
@@ -55,7 +56,8 @@ POLL=$(cfgval poll_minutes); POLL=${POLL:-30}
 [ "$POLL" -lt 20 ] && POLL=20
 sudo sed -i "s#^OnUnitActiveSec=.*#OnUnitActiveSec=${POLL}min#" /etc/systemd/system/downlink-desk-fetch.timer
 sudo systemctl daemon-reload
-sudo systemctl enable --now downlink-desk-web.service downlink-desk-fetch.timer >/dev/null
+sudo systemctl enable --now downlink-desk-web.service downlink-desk-fetch.timer downlink-desk-update.timer >/dev/null
+sudo systemctl restart downlink-desk-web.service
 
 say "5/5  Done"
 PORT=$(cfgval port); PORT=${PORT:-8080}
@@ -63,4 +65,6 @@ HOST=$(hostname)
 LANIP=$(ip -4 -o addr show wlan0 2>/dev/null | awk '{print $4}' | cut -d/ -f1); [ -z "$LANIP" ] && LANIP=$(ip -4 -o addr show eth0 2>/dev/null | awk '{print $4}' | cut -d/ -f1)
 echo "  Console:  http://${HOST}.local:${PORT}${LANIP:+   (or http://${LANIP}:${PORT})}"
 echo "  First fetch runs within two minutes. To fetch now:  $ROOT/.venv/bin/python -m downlink_desk.fetch --force"
-echo "  Logs:     journalctl -u downlink-desk-web -u downlink-desk-fetch -f"
+echo "  Starts by itself at every boot, and checks GitHub for updates 5 minutes after boot and nightly."
+echo "  Update now: sudo $ROOT/deploy/update.sh    (turn off: auto_update = false under [updates] in config.toml)"
+echo "  Logs:     journalctl -u downlink-desk-web -u downlink-desk-fetch -u downlink-desk-update -f"

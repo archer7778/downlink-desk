@@ -140,6 +140,19 @@ def build(conn, cfg, now=None):
         bits.append(f"solar flux {sw['f107']['value']:.0f}")
     if bits:
         out.append("Space weather: " + ", ".join(bits))
+    st = dbm.storage(conn, cfg.db_path)
+    if "disk_total" in st:
+        out.append(f"Pi: SD card {1 - st['disk_free'] / st['disk_total']:.0%} used ({st['disk_free'] / 1e9:.1f} GB free of "
+                   f"{st['disk_total'] / 1e9:.0f} GB), database {st['db_bytes'] / 1e6:.1f} MB"
+                   + (" ⚠" if st.get("level") != "ok" else ""))
+        if st.get("level") != "ok":
+            flags.append("disk")
+    try:
+        upd = __import__("json").loads((cfg.db_path.parent / "update.json").read_text())
+        if upd.get("result") in ("updated", "failed", "held", "available"):
+            out.append("Software: " + upd["message"])
+    except (OSError, ValueError):
+        pass
     text = "\n".join(x for x in out if x)
     local_date = _dt.datetime.fromtimestamp(now / 1000, _tz(cfg)).strftime("%a %d %b")
     names = " + ".join(s["name"] for s in sats) or "Downlink Desk"

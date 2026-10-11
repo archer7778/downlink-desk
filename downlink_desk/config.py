@@ -18,6 +18,7 @@ DEFAULTS = {
     "notify": {"ntfy_topic": "", "ntfy_server": "https://ntfy.sh", "console_url": "",
                "summary_hour": 7, "timezone": ""},
     "spaceweather": {"enabled": True, "api": "https://services.swpc.noaa.gov"},
+    "updates": {"auto_update": True},
 }
 
 

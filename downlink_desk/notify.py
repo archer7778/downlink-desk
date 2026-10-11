@@ -122,3 +122,16 @@ def fetch_failed(conn, cfg):
 def fetch_ok(conn):
     if dbm.meta_get(conn, "fail_notified", False):
         dbm.meta_set(conn, "fail_notified", False)
+
+
+def storage_check(conn, cfg, log=print):
+    """Warn once a day when the SD card is getting full."""
+    st = dbm.storage(conn, cfg.db_path)
+    if st.get("level") in ("warn", "crit") and _once(conn, f"disk:{dbm.now_ms() // 86_400_000}"):
+        gb = lambda b: f"{b / 1e9:.1f} GB"
+        if send(cfg, "Downlink Desk: SD card nearly full",
+                f"{gb(st['disk_free'])} free of {gb(st['disk_total'])}. The database is {st['db_bytes'] / 1e6:.0f} MB. "
+                "Free some space on the Pi, or move to a bigger card.", "high" if st["level"] == "crit" else "default",
+                "floppy_disk"):
+            log("Sent SD card warning.")
+    return st

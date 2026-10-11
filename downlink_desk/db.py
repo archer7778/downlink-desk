@@ -167,3 +167,32 @@ def open_db(cfg):
     conn = connect(cfg.db_path)
     migrate(conn, cfg)
     return conn
+
+
+def storage(conn, db_path):
+    """SD card size and use, the database's size, and how fast it's growing."""
+    import shutil
+    out = {}
+    try:
+        du = shutil.disk_usage(db_path.parent)
+        out.update(disk_total=du.total, disk_used=du.used, disk_free=du.free)
+    except OSError:
+        pass
+    size = 0
+    for suffix in ("", "-wal"):
+        try:
+            size += db_path.with_name(db_path.name + suffix).stat().st_size
+        except OSError:
+            pass
+    out["db_bytes"] = size
+    n, week = conn.execute("SELECT COUNT(*), SUM(CASE WHEN ts_ms>? THEN 1 ELSE 0 END) FROM frames",
+                           (now_ms() - 7 * 86_400_000,)).fetchone()
+    if n and size:
+        per_day = size / n * (week or 0) / 7
+        out["db_bytes_per_day"] = round(per_day)
+        if per_day > 0 and "disk_free" in out:
+            out["days_to_full"] = round(out["disk_free"] / per_day)
+    if "disk_total" in out:
+        frac = out["disk_free"] / out["disk_total"]
+        out["level"] = "crit" if frac < 0.03 or out["disk_free"] < 300e6 else "warn" if frac < 0.10 or out["disk_free"] < 1e9 else "ok"
+    return out
