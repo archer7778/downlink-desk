@@ -242,6 +242,11 @@ textarea{width:100%;border:1px solid var(--line);border-radius:5px;background:va
 .globe canvas{width:100%;max-width:440px;aspect-ratio:1/1;display:block;touch-action:none;cursor:grab}
 .globe-meta{padding:8px 14px 2px;font:12.5px/1.5 var(--f-mono);color:var(--muted);text-align:center;overflow-wrap:anywhere}
 .globe-meta b{color:var(--ink);font-weight:600}
+.downlinks{list-style:none;margin:6px 0 0;padding:0}
+.downlinks li{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:4px 10px;align-items:center;padding:6px 14px;border-top:1px solid var(--line);font-size:13px}
+.downlinks li .mono{font-size:13px;font-weight:600;white-space:nowrap}
+.downlinks li.next .mono{color:var(--warn)} .downlinks li.now .mono{color:var(--ok)}
+.legend i.tri{width:0;height:0;border-radius:0;background:none!important;border-left:5px solid transparent;border-right:5px solid transparent;border-bottom:9px solid currentColor}
 /* live feed, model, space weather, summary */
 .feed{list-style:none;margin:0;padding:0;max-height:330px;overflow:auto}
 .feed li{display:grid;grid-template-columns:4.6em minmax(0,1fr);gap:2px 10px;padding:7px 14px;border-top:1px solid var(--line);font-size:13px}
@@ -331,7 +336,8 @@ pre.sum{margin:0;padding:12px 14px;font:12.5px/1.6 var(--f-mono);white-space:pre
           <div class="ph"><h2>Where it is now</h2><div class="row"><span class="sub">Drag to spin</span><button class="iconbtn" id="globeFollow" aria-pressed="true" title="Keep the satellite centred">Follow</button></div></div>
           <div class="globe"><canvas id="globe" role="img" aria-label="Globe showing the satellite's position, ground track and heading"></canvas></div>
           <div class="globe-meta" id="globeMeta">Loading the orbit…</div>
-          <div class="legend"><span><i style="background:var(--accent)"></i>Satellite, arrow shows its heading</span><span><i class="band" style="background:var(--accent);opacity:.9"></i>Next orbit (dashed)</span><span><i class="band" style="background:var(--accent);opacity:.35"></i>Last 45 min</span><span><i style="background:transparent;border:1.5px solid var(--accent)"></i>Area that can hear it</span><span><i class="band" style="background:var(--t4)"></i>Your station</span><span><i class="band" style="background:#000;opacity:.35"></i>Night</span></div>
+          <ul class="downlinks" id="downlinks"></ul>
+          <div class="legend"><span><i style="background:var(--accent)"></i>Satellite, arrow shows its heading</span><span><i class="band" style="background:var(--accent);opacity:.9"></i>Next orbit (dashed)</span><span><i class="band" style="background:var(--accent);opacity:.35"></i>Last 45 min</span><span><i style="background:transparent;border:1.5px solid var(--accent)"></i>Area that can hear it</span><span><i class="band" style="background:var(--t4)"></i>Your station</span><span><i class="tri" style="color:var(--warn)"></i>Next SatNOGS station to listen (bold: the stretch it will hear)</span><span><i class="tri" style="color:var(--ok)"></i>Listening now / heard it today</span><span><i class="tri" style="color:var(--muted)"></i>Scheduled later</span><span><i class="band" style="background:#000;opacity:.35"></i>Night</span></div>
         </div>
         <div class="panel">
           <div class="ph"><h2>Alerts</h2><div class="row"><span class="sub" id="alertNote"></span><button class="btn sm" id="ackAll" hidden>Acknowledge all</button></div></div>
@@ -1123,7 +1129,18 @@ function drawGlobe(){
     draw(G.world.border,.5,.28);draw(G.world.coast,.9,.75)}
   // station
   if(CONF&&CONF.station&&(CONF.station.lat||CONF.station.lon)){const q=P(CONF.station.lat,CONF.station.lon);if(q[2]>0){c.fillStyle=col('--t4');c.fillRect(q[0]-3,q[1]-3,6,6);c.font='11px IBM Plex Sans,system-ui,sans-serif';c.fillText(CONF.station.name||'You',q[0]+6,q[1]+4)}}
+  // SatNOGS ground stations from the schedule: who heard it in the last day, who is listening now,
+  // and who listens next. The stretch of orbit the next station will hear is drawn bold.
+  const st=stationView(now);
+  const tri=(x,y,s)=>{c.beginPath();c.moveTo(x,y-s);c.lineTo(x+s*.9,y+s*.7);c.lineTo(x-s*.9,y+s*.7);c.closePath()};
+  for(const g of st.list){const q=P(g.lat,g.lng);if(q[2]<=0)continue;
+    const colr=g.kind==='now'?col('--ok'):g.kind==='next'?col('--warn'):g.kind==='heard'?col('--ok'):col('--muted');
+    tri(q[0],q[1],g.kind==='next'||g.kind==='now'?6:4);c.fillStyle=colr;c.globalAlpha=g.kind==='later'?.7:1;c.fill();c.globalAlpha=1;
+    if(g.kind==='now'){c.beginPath();c.arc(q[0],q[1],9+4*(Math.floor(now/500)%2),0,2*Math.PI);c.strokeStyle=colr;c.lineWidth=1.5;c.stroke()}
+    if(g.kind==='next'||g.kind==='now'){c.font='600 11px IBM Plex Sans,system-ui,sans-serif';c.fillStyle=col('--ink');c.fillText(g.name,q[0]+8,q[1]+12)}}
   const T=G.track&&G.track.points;
+  if(T&&st.next){const o=st.next,seg=T.filter(p=>p[0]>=o.start&&p[0]<=o.end).map(p=>[p[1],p[2]]);
+    if(seg.length>1){c.strokeStyle=col('--warn');c.lineWidth=4;c.globalAlpha=.85;line(seg);c.globalAlpha=1}}
   if(T&&sat){
     const acc=col('--accent');c.strokeStyle=acc;c.lineWidth=1.6;
     c.globalAlpha=.35;line(T.filter(p=>p[0]<=now&&p[0]>=now-45*MIN).map(p=>[p[1],p[2]]).concat([[sat.lat,sat.lon]]));
@@ -1134,15 +1151,41 @@ function drawGlobe(){
     if(q[2]>0){const ah=satAt(now+90000);if(ah){const qa=P(ah.lat,ah.lon),dx=qa[0]-q[0],dy=qa[1]-q[1],m=Math.hypot(dx,dy);
         if(m>.5){const ux=dx/m,uy=dy/m,L=26,tx=q[0]+ux*L,ty=q[1]+uy*L;c.strokeStyle=acc;c.fillStyle=acc;c.lineWidth=2;c.beginPath();c.moveTo(q[0],q[1]);c.lineTo(tx,ty);c.stroke();
           c.beginPath();c.moveTo(tx+ux*7,ty+uy*7);c.lineTo(tx-uy*5,ty+ux*5);c.lineTo(tx+uy*5,ty-ux*5);c.closePath();c.fill()}}
+      for(const g of st.list){if(g.kind!=='now')continue;const qs=P(g.lat,g.lng);if(qs[2]<=0)continue;
+        c.strokeStyle=col('--ok');c.lineWidth=1.5;c.setLineDash([2,3]);c.beginPath();c.moveTo(q[0],q[1]);c.lineTo(qs[0],qs[1]);c.stroke();c.setLineDash([])}
       c.beginPath();c.arc(q[0],q[1],5.5,0,2*Math.PI);c.fillStyle=acc;c.fill();c.lineWidth=2;c.strokeStyle=col('--panel');c.stroke();
       c.font='600 12px IBM Plex Sans Condensed,system-ui,sans-serif';c.fillStyle=col('--ink');c.fillText(CONF.satellite.name,q[0]+9,q[1]-8)}
   }
   c.restore();c.beginPath();c.arc(cx,cy,R,0,2*Math.PI);c.lineWidth=1;c.strokeStyle=col('--line');c.stroke();
   // numbers under the globe
   const meta=$('#globeMeta');
-  if(!sat){meta.textContent=T&&T.length?'Orbit data is out of date; it refreshes with the next fetch.':'Waiting for orbit data from the first fetch.';return}
+  if(!sat){renderDownlinks(now,st);meta.textContent=T&&T.length?'Orbit data is out of date; it refreshes with the next fetch.':'Waiting for orbit data from the first fetch.';return}
   const ah=satAt(now+30000),hd=ah?bearing(sat,ah):null,v=Math.sqrt(398600.4418/(R_E+sat.alt));
+  renderDownlinks(now,st);
   meta.innerHTML=`<b>${Math.abs(sat.lat).toFixed(2)}°${sat.lat>=0?'N':'S'} ${Math.abs(sat.lon).toFixed(2)}°${sat.lon>=0?'E':'W'}</b> · ${Math.round(sat.alt)} km up · ${v.toFixed(2)} km/s`+(hd!=null?` · heading <b>${Math.round(hd)}° ${COMPASS[Math.round(hd/22.5)%16]}</b>`:'')+` · ${sat.sunlit?'in sunlight':'in Earth’s shadow'}`;
+}
+function stationView(now){
+  const out={list:[],next:null,now:[]};if(!OBS||!OBS.observations)return out;
+  const by=new Map();
+  for(const o of OBS.observations){if(o.lat==null||o.lng==null)continue;
+    const k=o.station_id||o.station;const kind=o.start<=now&&o.end>=now?'now':o.start>now&&o.start<now+12*HOUR?'up':o.end<now&&o.end>now-DAY&&o.frames>0?'heard':null;
+    if(!kind)continue;const g=by.get(k)||{name:o.station,lat:o.lat,lng:o.lng,kind:'later',obs:[]};g.obs.push(o);
+    if(kind==='now')g.kind='now';else if(kind==='heard'&&g.kind==='later'&&!g.obs.some(x=>x.start>now))g.kind='heard';by.set(k,g)}
+  const up=OBS.observations.filter(o=>o.start>now&&o.lat!=null).sort((a,b)=>a.start-b.start);
+  out.next=up[0]||null;out.upcoming=up.slice(0,4);out.listening=OBS.observations.filter(o=>o.start<=now&&o.end>=now&&o.lat!=null);
+  for(const g of by.values()){if(g.kind!=='now'&&out.next&&g.obs.includes(out.next))g.kind='next';if(g.kind==='later'&&!g.obs.some(o=>o.start>now))g.kind='heard';out.list.push(g)}
+  // draw order: quiet ones first, the important ones on top
+  const rank={heard:0,later:1,next:2,now:3};out.list.sort((a,b)=>rank[a.kind]-rank[b.kind]);
+  return out;
+}
+let dlSig='';
+function renderDownlinks(now,st){
+  const box=$('#downlinks');if(!box)return;
+  const rows=[];
+  for(const o of st.listening||[])rows.push(`<li class="now"><span class="pill ok">Listening now</span><span><b>${esc(o.station)}</b> · until ${fmtHM(o.end)} · max ${Math.round(o.max_alt)}°</span><span class="mono">${dur(o.end-now)} left</span></li>`);
+  for(const o of (st.upcoming||[]).slice(0,rows.length?2:3))rows.push(`<li${o===st.next?' class="next"':''}><span class="pill ${o===st.next?'warn':''}">${o===st.next?'Next downlink':'Then'}</span><span><b>${esc(o.station)}</b> · ${fmtHM(o.start)}–${fmtHM(o.end)} · max ${Math.round(o.max_alt)}°</span><span class="mono">T− ${dur(o.start-now)}</span></li>`);
+  const html=rows.join('')||`<li><span></span><span class="note">${OBS?'No SatNOGS stations are scheduled to listen in the next 12 hours. Frames can still arrive from stations recording on their own.':'Loading the SatNOGS schedule…'}</span><span></span></li>`;
+  if(html!==dlSig){box.innerHTML=html;dlSig=html}
 }
 function globeLoop(){cancelAnimationFrame(G.raf);const step=()=>{drawGlobe();if(G.drag)G.raf=requestAnimationFrame(step)};G.raf=requestAnimationFrame(step)}
 function setupGlobe(){
@@ -1198,7 +1241,7 @@ async function poll(kind){
     if(kind==='log'){const after=LOG.length?LOG[LOG.length-1].seq:0;const add=await api('/api/log?after='+after);if(add.length){LOG.push(...add);buildCfg()}}
     if(kind==='health')HEALTH=await api('/api/health');
     if(kind==='passes')PASSES=await api('/api/passes?hours=36');
-    if(kind==='obs')OBS=await api('/api/observations?days=3');
+    if(kind==='obs'){OBS=await api('/api/observations?days=3');drawGlobe()}
     if(kind==='now')NOW=await api('/api/now');
     if(kind==='track'){G.track=await api('/api/track');drawGlobe()}
     if(kind==='model'){MODEL=await api('/api/model');lastModelSig='';renderModel()}
