@@ -48,7 +48,10 @@ jobs:
           key: demo-db-${{ github.run_id }}
           restore-keys: demo-db-
 
-      - name: Fetch from SatNOGS (and fill in three weeks of history on the first run)
+      # A code push only rebuilds the page from the data we already have; SatNOGS is asked
+      # on the 6-hour schedule (or a manual run) and nowhere else.
+      - name: Fetch from SatNOGS (and fill in two weeks of history on the first run)
+        if: github.event_name != 'push'
         env:
           SATNOGS_TOKEN: ${{ secrets.SATNOGS_TOKEN }}
         run: |
@@ -58,11 +61,11 @@ jobs:
           mkdir -p demo/data
           python -u -m downlink_desk.fetch --config demo-config.toml --force \
             || echo "::warning::SatNOGS fetch had a problem; publishing the data we have"
-          python -u -m downlink_desk.fetch --config demo-config.toml --history 21 \
+          python -u -m downlink_desk.fetch --config demo-config.toml --history 14 \
             || echo "::warning::History fill stopped early; it carries on next run"
 
       - name: Save the demo database for the next run
-        if: always()
+        if: always() && github.event_name != 'push'
         uses: actions/cache/save@v4
         with:
           path: demo/data
