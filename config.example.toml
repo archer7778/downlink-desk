@@ -1,0 +1,34 @@
+# Downlink Desk configuration. Copy to config.toml and edit.
+# Paths are relative to this file's folder.
+
+[satellite]
+norad = 60237                       # GRBBeta, a 1U CubeSat from TUKE (Slovakia)
+name = "GRBBeta"
+decoder = "grbbeta"                 # decoder name in the satnogs-decoders package
+channels = "channels/grbbeta.json"  # which decoded fields to show, with units and limits
+
+[satnogs]
+api = "https://db.satnogs.org/api"
+token_file = "secrets/satnogs_token"  # your SatNOGS DB API key (db.satnogs.org > avatar > Settings/API Token)
+poll_minutes = 30                   # please keep this at 20 or more; SatNOGS is volunteer-run
+max_pages = 3                       # pages per fetch once caught up
+backfill_pages = 6                  # pages on the very first fetch
+
+[station]
+# Your location, used to predict when the satellite passes over you.
+name = "Home"
+lat = 0.0
+lon = 0.0
+alt_m = 0
+min_elevation = 10
+
+[server]
+host = "0.0.0.0"
+port = 8080
+write_passcode = ""                 # optional: require this passcode for acknowledgements, notes and changes
+
+[storage]
+db = "data/downlink-desk.db"
+
+[alerts]
+stale_hours = 12                    # caution when no new frames arrive for this long (alarm at twice this)

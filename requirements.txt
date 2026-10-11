@@ -1,0 +1,2 @@
+satnogs-decoders>=1.129
+sgp4>=2.23
