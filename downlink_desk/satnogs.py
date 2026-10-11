@@ -102,6 +102,37 @@ class Client:
         return frames
 
 
+def scheduled_observations(network_api, norad):
+    """Upcoming observations of the satellite scheduled on SatNOGS Network (public, no key).
+    One request; the API returns the soonest-ending ~25 future observations."""
+    c = Client(network_api)
+    items = []
+    for page in (1, 2):   # 25 per page; a second page only when the first is full
+        try:
+            data = c._get(f"{c.api}/observations/", {"norad_cat_id": norad, "status": "future", "format": "json",
+                                                       "page": page})
+        except Refused:
+            if page == 1:
+                raise
+            break
+        got = data.get("results", []) if isinstance(data, dict) else data
+        items.extend(got)
+        if len(got) < 25:
+            break
+    out = []
+    for o in items:
+        if o.get("norad_cat_id") not in (None, norad):
+            continue
+        st, en = parse_ts(o.get("start")), parse_ts(o.get("end"))
+        if st is None or en is None:
+            continue
+        out.append({"id": int(o["id"]), "start_ms": st, "end_ms": en, "station_id": o.get("ground_station"),
+                    "station_name": str(o.get("station_name") or "")[:80], "lat": o.get("station_lat"),
+                    "lng": o.get("station_lng"), "max_alt": o.get("max_altitude"),
+                    "mode": str(o.get("transmitter_description") or o.get("transmitter_mode") or "")[:80]})
+    return out, len(items) < 50
+
+
 def parse_ts(s):
     if not s or not isinstance(s, str):
         return None

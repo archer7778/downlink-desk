@@ -17,6 +17,7 @@ from urllib.parse import parse_qs, urlparse
 
 from . import __version__, logchain
 from . import db as dbm
+from .analysis import observation_report, silent_streak
 from .config import find_config
 
 WEB = Path(__file__).resolve().parent.parent / "web"
@@ -30,6 +31,7 @@ class App:
         self.lock = threading.Lock()
         self.spec = cfg.channels()
         self._pass_cache = (0, None)
+        self._ecl_cache = {}
         self._fetching = False
         if not self.conn.execute("SELECT 1 FROM log LIMIT 1").fetchone():
             s = cfg["satellite"]
@@ -41,6 +43,7 @@ class App:
         c = self.cfg
         return {"version": __version__, "satellite": c["satellite"], "station": c["station"],
                 "poll_minutes": c["satnogs"]["poll_minutes"], "stale_hours": c["alerts"]["stale_hours"],
+                "alerts": c["alerts"], "phone_alerts": bool(str(c["notify"].get("ntfy_topic") or "").strip()),
                 "write_protected": bool(c["server"]["write_passcode"]), "spec": self.spec,
                 "commissioned_ms": self.conn.execute("SELECT MIN(t_ms) m FROM log").fetchone()["m"]}
 
@@ -48,19 +51,50 @@ class App:
         with self.lock:
             pts = self.conn.execute("SELECT ts_ms,channel,value FROM points WHERE ts_ms>? ORDER BY ts_ms LIMIT 50000",
                                     (since,)).fetchall()
-            frs = self.conn.execute("SELECT id,ts_ms,observer,frame_type,decoded_ok FROM frames WHERE ts_ms>? ORDER BY ts_ms LIMIT 20000",
+            frs = self.conn.execute("SELECT id,ts_ms,observer,frame_type,decoded_ok,sunlit FROM frames WHERE ts_ms>? ORDER BY ts_ms LIMIT 20000",
                                     (since,)).fetchall()
         return {"now": dbm.now_ms(), "points": [[r[0], r[1], r[2]] for r in pts],
-                "frames": [[r[0], r[1], r[2], r[3], r[4]] for r in frs]}
+                "frames": [[r[0], r[1], r[2], r[3], r[4], r[5]] for r in frs]}
 
     def frames(self, limit, before):
         with self.lock:
             rows = self.conn.execute(
-                "SELECT id,ts_ms,observer,station_id,app_source,frame_type,decoded_ok,fields_json,frame_hex FROM frames"
+                "SELECT id,ts_ms,observer,station_id,app_source,frame_type,decoded_ok,fields_json,frame_hex,sunlit,sub_lat,sub_lon FROM frames"
                 " WHERE ts_ms<? ORDER BY ts_ms DESC LIMIT ?", (before, limit)).fetchall()
         return [{"id": r["id"], "t": r["ts_ms"], "observer": r["observer"], "station_id": r["station_id"],
                  "app_source": r["app_source"], "type": r["frame_type"], "ok": bool(r["decoded_ok"]),
-                 "fields": json.loads(r["fields_json"] or "{}"), "hex": r["frame_hex"]} for r in rows]
+                 "fields": json.loads(r["fields_json"] or "{}"), "hex": r["frame_hex"],
+                 "sunlit": r["sunlit"], "sub_lat": r["sub_lat"], "sub_lon": r["sub_lon"]} for r in rows]
+
+    def observations(self, days):
+        now = dbm.now_ms()
+        with self.lock:
+            rep = observation_report(self.conn, self.cfg, now - days * 86_400_000, now)
+            refreshed = dbm.meta_get(self.conn, "obs_refreshed_ms")
+        streak = silent_streak(rep, self.cfg)
+        return {"now": now, "observations": rep, "refreshed_ms": refreshed,
+                "silent_streak": [o["id"] for o in streak], "silent_after": self.cfg["alerts"]["silent_after"]}
+
+    def eclipses(self, since, until):
+        key = (since // 1800_000, until // 1800_000)
+        if key in self._ecl_cache:
+            return self._ecl_cache[key]
+        with self.lock:
+            tle = dbm.meta_get(self.conn, "tle")
+        out = {"eclipses": []}
+        if tle:
+            from .orbit import eclipses
+            out["eclipses"] = eclipses(tle["tle1"], tle["tle2"], since, until, 60)
+        self._ecl_cache = {key: out}
+        return out
+
+    def now_state(self):
+        with self.lock:
+            tle = dbm.meta_get(self.conn, "tle")
+        if not tle:
+            return {}
+        from .orbit import now_state
+        return now_state(tle["tle1"], tle["tle2"], dbm.now_ms()) or {}
 
     def health(self):
         with self.lock:
@@ -169,6 +203,14 @@ def make_handler(app):
                     return self._json(app.health())
                 if p == "/api/passes":
                     return self._json(app.passes(min(float(q.get("hours", 36)), 72)))
+                if p == "/api/observations":
+                    return self._json(app.observations(min(float(q.get("days", 3)), 14)))
+                if p == "/api/eclipses":
+                    now = dbm.now_ms()
+                    since = max(int(q.get("since", now - 7 * 86_400_000)), now - 14 * 86_400_000)
+                    return self._json(app.eclipses(since, min(int(q.get("until", now)), now + 86_400_000)))
+                if p == "/api/now":
+                    return self._json(app.now_state())
                 if p == "/api/log":
                     with app.lock:
                         return self._json(logchain.entries(app.conn, int(q.get("after", 0))))

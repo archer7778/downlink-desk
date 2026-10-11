@@ -85,8 +85,44 @@ def make_frames(now=None, days=3, seed=7):
     return sorted(out, key=lambda f: f["timestamp"], reverse=True)
 
 
+STATIONS = [("Piszkesteto UHF", 2380, 47.917, 19.895), ("berlin_ma_sat", 4601, 42.378, -71.658),
+            ("IV3DXW", 3210, 46.07, 13.23), ("KM7DOS", 2767, 47.6, -122.3)]
+
+
+def make_observations(frames, now=None, seed=11):
+    """SatNOGS Network-shaped observations: one around each burst of frames (heard), a few
+    scheduled ones that produced nothing, and some in the future."""
+    rnd = random.Random(seed)
+    now = now or time.time()
+    ts = sorted(datetime.fromisoformat(f["timestamp"].replace("Z", "+00:00")).timestamp() for f in frames)
+    bursts, cur = [], [ts[0]]
+    for t in ts[1:]:
+        if t - cur[-1] > 1800:
+            bursts.append(cur)
+            cur = [t]
+        else:
+            cur.append(t)
+    bursts.append(cur)
+    windows = [(b[0] - 90, b[-1] + 90, rnd.uniform(20, 70)) for b in bursts]
+    for k in range(4):   # scheduled but nothing came down
+        t = now - rnd.uniform(6, 60) * 3600
+        windows.append((t, t + 540, rnd.uniform(18, 50)))
+    for k in range(6):   # still to come
+        t = now + (k + 1) * rnd.uniform(1.2, 2.5) * 3600
+        windows.append((t, t + 600, rnd.uniform(10, 80)))
+    out = []
+    for i, (a, b, el) in enumerate(windows):
+        name, sid, lat, lng = STATIONS[i % len(STATIONS)]
+        iso = lambda x: datetime.fromtimestamp(x, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        out.append({"id": 15170000 + i, "start": iso(a), "end": iso(b), "ground_station": sid, "station_name": name,
+                    "station_lat": lat, "station_lng": lng, "max_altitude": round(el, 1), "norad_cat_id": 60237,
+                    "status": "future" if a > now else "good", "transmitter_description": "Mode U - GFSK9k6 - AX.25"})
+    return sorted(out, key=lambda o: o["start"], reverse=True)
+
+
 def serve(port, token="test-token", page_size=25, require_token=True):
     frames = make_frames()
+    observations = make_observations(frames)
     state = {"requests": 0}
 
     class H(BaseHTTPRequestHandler):
@@ -112,6 +148,9 @@ def serve(port, token="test-token", page_size=25, require_token=True):
             if u.path == "/api/satellites/":
                 return self._json([{"sat_id": "FVZM-4350-0869-7957-1010", "norad_cat_id": 60237, "name": "GRBBeta",
                                     "status": "alive", "is_frequency_violator": False}])
+            if u.path == "/api/observations/":
+                page = int(q.get("page", 1))
+                return self._json(observations[(page - 1) * 25: page * 25])
             if u.path == "/api/telemetry/":
                 if require_token and self.headers.get("Authorization") != f"Token {token}":
                     return self._json({"detail": "Authentication credentials were not provided."}, 401)
