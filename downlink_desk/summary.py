@@ -80,7 +80,7 @@ def satellite_section(conn, cfg, sat, now):
                 restarts.append(f"{ch['name']} {p:.0f}→{r[1]:.0f}")
             p = r[1]
     if restarts:
-        lines.append("Restarts: " + "; ".join(restarts[:4]))
+        lines.append("Boot counters up in the last 24 h: " + "; ".join(restarts[:4]))
         flags.append("restart")
     # learned model
     try:

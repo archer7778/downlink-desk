@@ -213,7 +213,7 @@ class App:
     def config(self, sat):
         c = self.cfg
         return {"version": __version__, "satellite": {"norad": sat["norad"], "name": sat["name"], "decoder": sat["decoder"]},
-                "station": c["station"], "poll_minutes": c["satnogs"]["poll_minutes"], "stale_hours": c["alerts"]["stale_hours"],
+                "station": c["station"], "poll_minutes": max(20, c["satnogs"]["poll_minutes"]), "stale_hours": c["alerts"]["stale_hours"],
                 "alerts": c["alerts"], "phone_alerts": bool(str(c["notify"].get("ntfy_topic") or "").strip()),
                 "write_protected": bool(c["server"]["write_passcode"]), "spec": self.spec(sat),
                 "default_norad": int(c["satellite"]["norad"]),
@@ -231,7 +231,7 @@ class App:
                 frs = c.execute("SELECT id,ts_ms,observer,frame_type,decoded_ok,sunlit FROM frames WHERE norad=? AND id>? "
                                 "ORDER BY id LIMIT 5000", (n, after_id)).fetchall()
                 if frs:
-                    max_id = frs[-1][0] if len(frs) == 5000 else max_id
+                    max_id = frs[-1][0] if len(frs) == 5000 else max(max_id, frs[-1][0])   # a frame stored in between
                     t0, t1 = min(r[1] for r in frs), max(r[1] for r in frs)
                     lo = min(r[0] for r in frs)
                     pts = c.execute("SELECT ts_ms,channel,value FROM points WHERE norad=? AND ts_ms BETWEEN ? AND ? "

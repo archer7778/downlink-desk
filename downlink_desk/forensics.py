@@ -49,15 +49,37 @@ def restarts(conn, spec, norad, days=30, now=None):
         k = UNIT_S.get(c.get("unit", ""), 1)
         rows = conn.execute("SELECT ts_ms, value FROM points WHERE norad=? AND channel=? AND ts_ms>? ORDER BY ts_ms",
                             (norad, c["id"], since - 7 * DAY)).fetchall()
-        for (t0, v0), (t1, v1) in zip(rows, rows[1:]):
+        boot = [t - v * k * 1000 for t, v in rows]   # implied moment of the last restart, per frame
+        for i, ((t0, v0), (t1, v1)) in enumerate(zip(rows, rows[1:])):
             up1 = v1 * k
             # uptime went down (beyond rounding): it restarted between the two frames
             if v1 * k < v0 * k + (t1 - t0) / 1000 - 300 and v1 * k < v0 * k:
                 at = int(t1 - up1 * 1000)
-                if at >= t0 - 60_000 and at >= since:
-                    found.append({"t": at, "exact": True, "subsystem": _subsystem(c.get("name", c["id"])),
-                                  "channel": c["id"], "seen": t1})
-    # boot counters: catch restarts the uptime counters missed (time known only to a window)
+                # one garbled frame looks like a restart, but the frame after it goes back to the old
+                # boot time; tolerance covers counters kept in whole hours
+                if i + 2 < len(rows) and abs(boot[i + 2] - boot[i]) <= max(120, k) * 1000 + 60_000:
+                    continue
+                sub = _subsystem(c.get("name", c["id"]))
+                if at >= t0 - 60_000 and at >= since and not any(
+                        f["subsystem"] == sub and abs(f["t"] - at) <= max(600, k) * 1000 for f in found):
+                    found.append({"t": at, "exact": True, "subsystem": sub, "channel": c["id"], "seen": t1, "after": t0})
+    # boot counters: catch restarts the uptime counters missed (time known only to a window), and
+    # overrule an uptime "restart" the subsystem's own boot counter says never happened (a counter
+    # that wrapped round, say)
+    boots = {}
+    for c in _boot_channels(conn, spec, norad):
+        rows = conn.execute("SELECT ts_ms, value FROM points WHERE norad=? AND channel=? AND ts_ms>? ORDER BY ts_ms",
+                            (norad, c["id"], since - 7 * DAY)).fetchall()
+        boots.setdefault(_subsystem(c.get("name", c["id"])), []).append(rows)
+
+    def denied(f):
+        for rows in boots.get(f["subsystem"], []):
+            before = [v for t, v in rows if t <= f["after"]]
+            after = [v for t, v in rows if t >= f["seen"]]
+            if before and after and after[0] == before[-1]:
+                return True
+        return False
+    found = [f for f in found if not denied(f)]
     for c in _boot_channels(conn, spec, norad):
         rows = conn.execute("SELECT ts_ms, value FROM points WHERE norad=? AND channel=? AND ts_ms>? ORDER BY ts_ms",
                             (norad, c["id"], since)).fetchall()
@@ -68,6 +90,8 @@ def restarts(conn, spec, norad, days=30, now=None):
                     found.append({"t": t1, "exact": False, "window": [t0, t1], "subsystem": sub,
                                   "channel": c["id"], "seen": t1, "count": int(v1 - v0)})
     found.sort(key=lambda f: f["t"])
+    for f in found:
+        f.pop("after", None)
     # where was it, and what was space weather doing?
     tle = dbm.smeta_get(conn, norad, "tle")
     sat = None

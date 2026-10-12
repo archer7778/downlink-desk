@@ -473,6 +473,23 @@ def test_forensics_and_silence():
         assert len(got) == 5
         assert all(min(abs(f["t"] - b) for b in boots) < 6 * 60_000 for f in got)   # within the 0.1 h rounding
         assert r["stats"]["in_saa"] == 4 and r["stats"]["saa_p_value"] < 0.05
+        # a single garbled uptime reading is not a restart
+        mid = now - 5 * 86_400_000 + 3_600_000
+        assert conn.execute("UPDATE points SET value=0.2 WHERE channel='uhf_up' AND ts_ms=(SELECT MIN(ts_ms) FROM points "
+                            "WHERE channel='uhf_up' AND ts_ms>? AND value>30)", (mid,)).rowcount == 1
+        conn.commit()
+        assert len([f for f in forensics.restarts(conn, cfg.channels(), 60237, 30)["restarts"] if f["exact"]]) == 5
+        # an uptime drop the subsystem's own boot counter contradicts (a wrapped counter) isn't one either
+        rows = conn.execute("SELECT ts_ms, frame_id FROM points WHERE channel='uhf_up' ORDER BY ts_ms").fetchall()
+        conn.executemany("INSERT INTO points(ts_ms,channel,value,frame_id,norad) VALUES(?,'uhf_boots',?,?,60237)",
+                         [(t, 7 + sum(1 for b in boots if b <= t), f) for t, f in rows])
+        conn.commit()
+        assert len([f for f in forensics.restarts(conn, cfg.channels(), 60237, 30)["restarts"] if f["exact"]]) == 5
+        conn.execute("UPDATE points SET value=7 WHERE channel='uhf_boots'")   # the counter says: never restarted
+        conn.commit()
+        assert not forensics.restarts(conn, cfg.channels(), 60237, 30)["restarts"]
+        conn.execute("DELETE FROM points WHERE channel='uhf_boots'")
+        conn.commit()
         # frames only count for the station that was scheduled; others' frames still prove it's alive
         from downlink_desk.analysis import observation_report, silence
         t0 = now - 5 * 3600_000
