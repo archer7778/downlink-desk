@@ -649,6 +649,12 @@ def test_network_failures():
         from downlink_desk import catalog
         assert any(e["norad"] == 60237 for e in catalog.entries(conn, cfg))
         assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        # a Pi that booted with its clock days behind waits for the clock rather than fetching
+        conn.execute("UPDATE frames SET fetched_ms=fetched_ms+3*86400000 WHERE id=(SELECT MAX(id) FROM frames)")
+        conn.commit()
+        msgs = []
+        before = state["requests"]
+        assert fetch.run(cfg, force=True, log=msgs.append) == 0 and "clock" in msgs[-1] and state["requests"] == before
     finally:
         httpd.shutdown()
         shutil.rmtree(tmp)

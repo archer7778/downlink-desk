@@ -16,7 +16,16 @@ def _tz(cfg):
             return ZoneInfo(name)
         except Exception:
             pass
-    return _dt.datetime.now().astimezone().tzinfo   # the Pi's own time zone
+    # The Pi's own time zone, by name if we can find it (so summer-time changes are followed)
+    try:
+        import os
+        from zoneinfo import ZoneInfo
+        link = os.path.realpath("/etc/localtime")
+        if "zoneinfo/" in link:
+            return ZoneInfo(link.split("zoneinfo/", 1)[1])
+    except Exception:
+        pass
+    return _dt.datetime.now().astimezone().tzinfo
 
 
 def _local(cfg, t_ms, fmt="%H:%M"):

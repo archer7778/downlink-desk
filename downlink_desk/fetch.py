@@ -251,6 +251,13 @@ def run(cfg, force=False, log=print, only=None):
         log("Another fetch is running; skipping.")
         return 0
     try:
+        # A Pi has no clock battery: just after boot, before it syncs over the network, it can
+        # think it's hours or days in the past. Frames would look future-dated and the morning
+        # summary would go out on the wrong day, so wait for the clock instead.
+        last_seen = conn.execute("SELECT MAX(fetched_ms) FROM frames").fetchone()[0] or 0
+        if last_seen > dbm.now_ms() + 10 * 60_000:
+            log("The system clock is behind the newest stored data (not synced yet?); skipping this fetch.")
+            return 0
         client = satnogs.Client(cfg["satnogs"]["api"], cfg.token)   # one client: pacing is shared
         dbm.meta_set(conn, "last_attempt_ms", dbm.now_ms())
         worst = 0

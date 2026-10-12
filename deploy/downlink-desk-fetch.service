@@ -1,6 +1,6 @@
 [Unit]
 Description=Downlink Desk: fetch new telemetry from SatNOGS
-After=network-online.target
+After=network-online.target time-sync.target
 Wants=network-online.target
 
 [Service]

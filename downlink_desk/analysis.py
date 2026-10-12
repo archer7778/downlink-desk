@@ -54,6 +54,12 @@ def silent_streak(report, cfg):
     return list(reversed(streak))
 
 
+def _good_limits(v):
+    import math
+    return (isinstance(v, list) and len(v) == 4 and all(
+        x is None or (isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)) for x in v))
+
+
 def limits_in_force(conn, spec, norad, default_norad):
     """Default limits from the channels file, overridden by signed limit changes in the log.
     Limit entries from before multi-satellite support carry no satellite and belong to the first one."""
@@ -63,11 +69,16 @@ def limits_in_force(conn, spec, norad, default_norad):
             d = json.loads(r["data_json"])
         except ValueError:
             continue
-        if int(d.get("sat") or default_norad) != norad:
+        try:
+            if not isinstance(d, dict) or int(d.get("sat") or default_norad) != norad:
+                continue
+        except (TypeError, ValueError):
+            continue
+        if not _good_limits(d.get("lim")):   # same rule as the console: four numbers or blanks
             continue
         if not spec["channels"]:
             lim.setdefault(d.get("ch"), None)
-        if d.get("ch") in lim and isinstance(d.get("lim"), list) and len(d["lim"]) == 4:
+        if d.get("ch") in lim:
             lim[d["ch"]] = None if all(v is None for v in d["lim"]) else d["lim"]
     return lim
 
