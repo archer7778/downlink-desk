@@ -18,7 +18,8 @@ def decode(decoder_name, frame_hex):
     mod = _decoders()
     cls = getattr(mod, decoder_name.capitalize().replace("_", ""), None)
     if cls is None:
-        raise SystemExit(f"satnogs-decoders has no decoder called '{decoder_name}'")
+        # a ValueError, not an exit: one satellite with a missing decoder mustn't stop the others
+        raise ValueError(f"satnogs-decoders has no decoder called '{decoder_name}' (try updating it)")
     try:
         raw = bytes.fromhex(frame_hex)
         return mod.get_fields(cls.from_bytes(raw))

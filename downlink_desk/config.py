@@ -23,13 +23,41 @@ DEFAULTS = {
 }
 
 
+def _coerce(section, key, value, default):
+    if isinstance(default, bool):
+        if isinstance(value, bool):
+            return value
+        if str(value).strip().lower() in ("true", "yes", "on", "1"):
+            return True
+        if str(value).strip().lower() in ("false", "no", "off", "0"):
+            return False
+    elif isinstance(default, (int, float)):
+        try:
+            x = float(value)
+        except (TypeError, ValueError):
+            x = float("nan")
+        if x == x and abs(x) != float("inf"):
+            return int(x) if isinstance(default, int) and x == int(x) else x
+    else:
+        return value if value is not None else default
+    raise SystemExit(f"config.toml: {key} under [{section}] should be "
+                     f"{'true or false' if isinstance(default, bool) else 'a number'}, not {value!r}.")
+
+
 class Config:
     def __init__(self, path):
         self.path = Path(path).resolve()
         self.root = self.path.parent
         with open(self.path, "rb") as f:
             raw = tomllib.load(f)
-        self.data = {k: {**v, **raw.get(k, {})} for k, v in DEFAULTS.items()}
+        self.data = {}
+        for k, v in DEFAULTS.items():
+            got = raw.get(k, {})
+            if not isinstance(got, dict):
+                raise SystemExit(f"config.toml: [{k}] should be a section, not a single value.")
+            self.data[k] = {**v, **got}
+            for key, default in v.items():   # a number typed in quotes still works; nonsense is named
+                self.data[k][key] = _coerce(k, key, self.data[k][key], default)
         for k, v in raw.items():
             if k not in self.data:
                 self.data[k] = v

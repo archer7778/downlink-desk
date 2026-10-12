@@ -72,7 +72,7 @@ def limits_in_force(conn, spec, norad, default_norad):
     return lim
 
 
-def silence_probability(report, cfg, prior=0.02, strength=4.0):
+def silence_probability(report, cfg, prior=0.02, strength=4.0, alive_ms=0):
     """How likely is it that the satellite has really gone quiet, rather than the stations missing it?
 
     Each station has a track record in the last month: of its finished, reasonably high
@@ -98,7 +98,8 @@ def silence_probability(report, cfg, prior=0.02, strength=4.0):
     rate = {k: (h + strength * pg) / (n + strength) for k, (h, n) in st.items()}
     streak = []
     for o in reversed(done):
-        if o["status"] == "heard" or o.get("others"):
+        # stop at a hit, or at the last moment anyone heard it: misses before that aren't evidence
+        if o["status"] == "heard" or o.get("others") or o["end"] < alive_ms:
             break
         streak.append(o)
     lr = 1.0
@@ -120,7 +121,7 @@ def silence(conn, cfg, norad, now):
     # was alive then, even if the scheduled station heard nothing.
     last = conn.execute("SELECT MAX(ts_ms) FROM frames WHERE norad=?", (norad,)).fetchone()[0] or 0
     streak = [o for o in silent_streak(rep, cfg) if o["start"] > last]
-    p = silence_probability(rep, cfg)
+    p = silence_probability(rep, cfg, alive_ms=last)
     thr = cfg["alerts"].get("silent_probability", 0.8)
     if p["probability"] is not None and p.get("stations", 0) and len(rep) >= 5:
         p["silent"] = p["probability"] >= thr and len(streak) >= 2

@@ -170,7 +170,7 @@ def fetch_one(conn, cfg, client, sat_row, force, log):
     norad = sat_row["norad"]
     now = dbm.now_ms()
     last = dbm.smeta_get(conn, norad, "last_attempt_ms", 0) or 0
-    min_gap = (2 * 60_000) if force else int(sc["poll_minutes"] * 60_000 * 0.8)
+    min_gap = (2 * 60_000) if force else int(max(20, sc["poll_minutes"]) * 60_000 * 0.8)   # never under 20 min
     never_ok = dbm.smeta_get(conn, norad, "last_ok_ms") is None
     if now - last < min_gap and not (force and never_ok):   # a newly tracked satellite may retry straight away
         log(f"[{norad}] Fetched recently; skipping to stay polite to SatNOGS.")
