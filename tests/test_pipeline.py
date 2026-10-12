@@ -223,6 +223,14 @@ def test_model_spaceweather_summary_stream():
         assert by["bat_t"]["sigma"] < 1.0   # the orbit swing (±6 °C) is explained, not counted as noise
         assert "uhf_digi" not in by and "uhf_boots" not in by
         assert by["bat_t"]["n_unusual"] < 3   # a drift is reported once as a drift, not as dozens of oddities
+        # a channel that spikes routinely (like discharge current when the radio transmits) isn't "unusual"
+        spiky = [(r["id"], r["ts_ms"]) for r in conn.execute("SELECT id, ts_ms FROM frames WHERE id<=? ORDER BY id", (20 * 48,))]
+        conn.executemany("INSERT INTO points(ts_ms,channel,value,frame_id,norad) VALUES(?,?,?,?,60237)",
+                         [(t, "bat_dis", 535 + (400 if i % 12 == 0 else 0), fid) for i, (fid, t) in enumerate(spiky)])
+        conn.commit()
+        m2 = {c["id"]: c for c in baseline.compute(conn, cfg.channels(), 60237)["channels"]}
+        print("spiky channel:", m2["bat_dis"]["status"], "unusual", m2["bat_dis"]["n_unusual"])
+        assert m2["bat_dis"]["n_unusual"] == 0 and m2["bat_dis"]["status"] == "normal"
         pr = baseline.profile(conn, cfg.channels(), 60237, "bat_t")
         assert len([b for b in pr["bins"] if b]) > 15 and pr["recent"] and pr["base"]
         # space weather from the NOAA look-alike
