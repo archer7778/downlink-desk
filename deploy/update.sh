@@ -95,7 +95,9 @@ as_user .venv/bin/python -c "import downlink_desk.server, downlink_desk.fetch" |
 if [ "$(id -u)" -eq 0 ]; then
   if grep -qE '^deploy/.*\.(service|timer)$' <<<"$CHANGED"; then
     install_units
-    systemctl enable downlink-desk-web.service downlink-desk-fetch.timer downlink-desk-update.timer >/dev/null 2>&1
+    systemctl enable downlink-desk-web.service >/dev/null 2>&1
+    # timers start now, not at the next reboot (a new nightly check would otherwise sit idle)
+    systemctl enable --now downlink-desk-fetch.timer downlink-desk-update.timer >/dev/null 2>&1
   fi
   systemctl restart downlink-desk-web
   PORT="$(cfgval port)"; PORT="${PORT:-8080}"

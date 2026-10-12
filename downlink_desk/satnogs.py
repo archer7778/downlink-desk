@@ -116,8 +116,10 @@ class Client:
         if end_ms is not None:
             params["end"] = _iso(end_ms)
         self.exhausted = False   # True when SatNOGS had no further page (not just our page limit)
+        self.pages_used = 0
         for _ in range(max_pages):
             data = self._get(url, params, auth=True)
+            self.pages_used += 1
             page = data.get("results", []) if isinstance(data, dict) else data
             page = [f for f in page if isinstance(f, dict)] if isinstance(page, list) else []
             frames.extend(page)

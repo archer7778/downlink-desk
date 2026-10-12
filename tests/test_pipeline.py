@@ -538,6 +538,33 @@ def test_history_fill():
         cfg.data["satnogs"]["history_pages_per_fetch"] = 8
         fetch.run(cfg, force=True, log=msgs.append)
         assert all(not (w[0] and w[1]) for w in state["windows"][before:])
+        # A flood: 2,000 uploads in ten minutes two days back (seen on a real Pi: history crawled
+        # through one busy afternoon for a day). It is sampled and passed, not read frame by frame.
+        from datetime import datetime, timezone
+        t0 = frames[-1]["timestamp"]
+        base = datetime.strptime(t0[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc).timestamp() - 2 * 86400
+        flood = [{**frames[0], "observer": "Flood", "timestamp": datetime.fromtimestamp(base + i * 0.3, timezone.utc)
+                  .strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"} for i in range(2000)]
+        older = [{**frames[0], "observer": "Older", "timestamp": datetime.fromtimestamp(base - 86400 - i * 3600, timezone.utc)
+                  .strftime("%Y-%m-%dT%H:%M:%SZ")} for i in range(5)]
+        frames.extend(flood + older)
+        frames.sort(key=lambda f: f["timestamp"], reverse=True)
+        dbm.smeta_set(conn, 60237, "history_done_ms", None)   # as on a Pi that hadn't finished yet
+        dbm.smeta_set(conn, 60237, "history_cursor_ms", None)
+        dbm.smeta_set(conn, 60237, "history_window_ms", None)
+        msgs = []
+        runs = 0
+        for runs in range(1, 6):
+            dbm.smeta_set(conn, 60237, "last_attempt_ms", 0)
+            fetch.run(cfg, force=True, log=msgs.append)
+            if dbm.smeta_get(conn, 60237, "history_done_ms"):
+                break
+        n_flood = conn.execute("SELECT COUNT(*) FROM frames WHERE observer='Flood'").fetchone()[0]
+        n_older = conn.execute("SELECT COUNT(*) FROM frames WHERE observer='Older'").fetchone()[0]
+        print(f"flood: done after {runs} fetches, {n_flood} of 2000 flood frames sampled, {n_older} of 5 older frames;",
+              [m for m in msgs if "sampled" in m][:1])
+        assert dbm.smeta_get(conn, 60237, "history_done_ms") and runs <= 5
+        assert 0 < n_flood < 1000 and n_older == 5   # sampled the burst, then carried on past it
     finally:
         httpd.shutdown()
         shutil.rmtree(tmp)
