@@ -198,7 +198,10 @@ def compute(conn, spec, norad, now=None):
         fit = _Fit(base, period)
         bres = [r[1] - fit.expect(r) for r in base]
         floor = 0.5 * 10 ** -int(c.get("dp", 2))
-        sigma = max(_robust_sigma(bres), floor, 1e-9)
+        # Normal scatter. The robust estimate ignores rare spikes, but for a channel that sits on one
+        # value and occasionally jumps it collapses to nearly zero, so it's floored at half the plain
+        # standard deviation: tiny wobbles in such a channel then don't count as shifts.
+        sigma = max(_robust_sigma(bres), 0.5 * statistics.pstdev(bres), floor, 1e-9)
         rres = [(r, r[1] - fit.expect(r)) for r in rec]
         res["sigma"] = sigma
         res["seasonal_per_min"] = round(fit.k, 4) if fit.sh0 is not None else None
@@ -212,7 +215,9 @@ def compute(conn, spec, norad, now=None):
             se = 1.2533 * sigma / math.sqrt(len(rres))
             sig = abs(shift) / se
             res.update(shift=shift, z=z)
-            res["status"] = "drift" if abs(z) >= 1.0 and sig >= 4 else "watch" if abs(z) >= 0.5 and sig >= 3 else "normal"
+            # Judged on size (how far, in units of the channel's normal scatter) and on evidence
+            # (enough samples that it isn't chance). Size thresholds keep tiny-but-certain shifts quiet.
+            res["status"] = "drift" if abs(z) >= 2.0 and sig >= 4 else "watch" if abs(z) >= 1.0 and sig >= 4 else "normal"
         else:
             res["status"] = "quiet"
         # long-term trend of the residuals, per week
@@ -225,8 +230,14 @@ def compute(conn, spec, norad, now=None):
                 res["trend_per_week"] = sum((t - mt) * (v - mv) for t, v in allr) / stt * 7 * DAY
         # one-off oddities: far from the model even after allowing for any drift already flagged
         lvl = res.get("shift", 0.0)
+        # Some channels spike as part of normal life (discharge current jumps whenever the radio
+        # transmits). If the learning period had spikes that big too, they aren't oddities: raise
+        # the bar to just above the largest routine excursions seen while learning.
+        dev = sorted(abs(x - statistics.median(bres)) for x in bres)
+        bar = max(UNUSUAL_SIGMA * sigma, 1.2 * _q(dev, 0.995))
+        res["unusual_bar"] = bar
         unusual = [{"t": r[0], "value": r[1], "expected": r[1] - x, "sigmas": x / sigma}
-                   for r, x in rres if abs(x - lvl) >= UNUSUAL_SIGMA * sigma]
+                   for r, x in rres if abs(x - lvl) >= bar]
         res["unusual"] = unusual[-5:]
         res["n_unusual"] = len(unusual)
         out["channels"].append(res)
