@@ -173,6 +173,12 @@ class _Fit:
         self.shade = statistics.median(shade) if len(shade) >= 4 else None
         self.all = statistics.median([r[1] for r in base])
         self.k = self.coef[-1] if (self.coef and self.sh0 is not None) else 0.0
+        # The curve is smooth, so tabulate it every 15 s of orbit and look values up (linear
+        # interpolation) instead of evaluating sines and cosines for every sample.
+        self.table = None
+        if self.coef:
+            n = int(period * 4) + 2
+            self.table = [self.curve(i / 4) for i in range(n)]
 
     def _feats(self, r, phase=None, shadow=None):
         th = 2 * math.pi * ((r[2] if phase is None else phase) / self.period)
@@ -191,8 +197,13 @@ class _Fit:
         return sum(c * f for c, f in zip(self.coef, self._feats((0, 0, phase, 0, self.sh0))))
 
     def expect(self, r):
-        if self.coef and r[2] is not None and r[2] >= 0:
-            return sum(c * f for c, f in zip(self.coef, self._feats(r)))
+        if self.table and r[2] is not None and r[2] >= 0:
+            x = (r[2] % self.period) * 4
+            i = int(x)
+            v = self.table[i] + (self.table[i + 1] - self.table[i]) * (x - i)
+            if self.sh0 is not None and r[4] is not None:
+                v += self.k * (r[4] - self.sh0)
+            return v
         base = self.sun if r[3] == 1 and self.sun is not None else self.shade if r[3] == 0 and self.shade is not None else self.all
         if self.sh0 is not None and r[4] is not None:
             base += self.k * (r[4] - self.sh0)
@@ -210,6 +221,20 @@ def _passes(rows, gap_ms=15 * 60_000):
             cur = []
         cur.append(r)
         last = r[0]
+    if cur:
+        groups.append(cur)
+    return groups
+
+
+def _passes_pairs(pairs, gap_ms=15 * 60_000):
+    """_passes for (row, residual) pairs."""
+    groups, cur, last = [], [], None
+    for p in pairs:
+        if last is not None and p[0][0] - last > gap_ms:
+            groups.append(cur)
+            cur = []
+        cur.append(p)
+        last = p[0][0]
     if cur:
         groups.append(cur)
     return groups
@@ -295,13 +320,16 @@ def compute(conn, spec, norad, now=None):
             out["channels"].append(res)
             continue
         fit = _Fit(base, period)
-        bres = [r[1] - fit.expect(r) for r in base]
+        # residual of every sample from the fitted curve, worked out once (it's the costly bit)
+        resid = [r[1] - fit.expect(r) for r in rows]
+        nb_ = len(base)
+        bres = resid[:nb_]
         floor = 0.5 * 10 ** -int(c.get("dp", 2))
         # Normal scatter. The robust estimate ignores rare spikes, but for a channel that sits on one
         # value and occasionally jumps it collapses to nearly zero, so it's floored at half the plain
         # standard deviation: tiny wobbles in such a channel then don't count as shifts.
         sigma = max(_robust_sigma(bres), 0.5 * statistics.pstdev(bres), floor, 1e-9)
-        rres = [(r, r[1] - fit.expect(r)) for r in rec]
+        rres = list(zip(rec, resid[nb_:]))
         res["sigma"] = sigma
         res["seasonal_per_min"] = round(fit.k, 4) if fit.sh0 is not None else None
         if rows:
@@ -309,15 +337,15 @@ def compute(conn, spec, norad, now=None):
             e = fit.expect(last)
             res["latest"] = {"t": last[0], "value": last[1], "expected": e, "sigmas": (last[1] - e) / sigma}
         # Judge the last days at the level of passes: each pass contributes its median residual.
-        rp = [statistics.median([r[1] - fit.expect(r) for r in g]) for g in _passes(rec)]
+        rp = [statistics.median([x for _, x in g]) for g in _passes_pairs(rres)]
         res["n_recent_passes"] = len(rp)
         if len(rp) >= MIN_RECENT_PASSES:
             shift = statistics.median(rp)
             z = shift / sigma
             # 90% range for the shift by resampling whole passes (bootstrap)
             rnd = random.Random(zlib.crc32(c["id"].encode()))
-            boots = sorted(statistics.median([rp[rnd.randrange(len(rp))] for _ in rp]) for _ in range(300))
-            lo, hi = boots[15], boots[284]
+            boots = sorted(statistics.median([rp[rnd.randrange(len(rp))] for _ in rp]) for _ in range(200))
+            lo, hi = boots[10], boots[189]
             res.update(shift=shift, z=z, shift_range=[lo, hi])
             # Size (in units of normal scatter) AND evidence (the 90% range keeps clear of the
             # threshold): a shift has to be both real and big enough to matter.
@@ -327,13 +355,16 @@ def compute(conn, spec, norad, now=None):
         else:
             res["status"] = "quiet"
         # when did it change? CUSUM over every pass in the window, oldest first
-        allp = [(g[-1][0], statistics.median([r[1] - fit.expect(r) for r in g])) for g in _passes(rows)]
+        allp = [(g[-1][0][0], statistics.median([x for _, x in g])) for g in _passes_pairs(list(zip(rows, resid)))]
         cp = _change_point(allp)
         if cp and res["status"] in ("watch", "drift"):
             res["change"] = cp
         # long-term trend of the residuals, per week (robust slope over passes)
         if allp and allp[-1][0] - allp[0][0] >= 7 * DAY and len(allp) >= 10:
-            slope = _theil_sen(allp[-400:])
+            days = {}
+            for t, v in allp:   # trend over daily medians: as robust, and a few dozen points not hundreds
+                days.setdefault(t // DAY, []).append(v)
+            slope = _theil_sen([(d * DAY + DAY // 2, statistics.median(v)) for d, v in sorted(days.items())])
             if slope is not None:
                 res["trend_per_week"] = slope * 7 * DAY
         # one-off oddities: far from the model even after allowing for any drift already flagged

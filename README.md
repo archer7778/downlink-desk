@@ -108,7 +108,8 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 - The South Atlantic Anomaly outline is an approximate ellipse; the real edge depends on altitude.
 - Limits and some unit conversions (millivolts, kelvin) are inferred from decoder field names. Check them against the mission's documentation.
 - The audit trail is tamper-evident, not tamper-proof: someone with access to the Pi's files could rebuild the chain.
-- No user accounts. Run it on your home network or a private network such as Tailscale, and set `write_passcode` if others can reach it.
+- No user accounts. Run it on your home network or a private network such as Tailscale, and set `write_passcode` if others can reach it. Changes are only accepted from the console's own page, so another website can't make them through a visitor's browser.
+- The updater runs code from this repository with administrator rights on the Pi, so anyone who can push to the repository can run code on it. Keep your GitHub account secure, or set `auto_update = false`.
 
 ## Credits
 

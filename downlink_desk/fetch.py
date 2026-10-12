@@ -185,9 +185,13 @@ def fetch_one(conn, cfg, client, sat_row, force, log):
     dbm.smeta_set(conn, norad, "last_attempt_ms", now)
     newest = conn.execute("SELECT MAX(ts_ms) m FROM frames WHERE norad=?", (norad,)).fetchone()["m"]
     pages = int(sc["max_pages"] if newest else sc["backfill_pages"])
+    # SatNOGS lists frames by when the satellite sent them, not when a station uploaded them, and
+    # stations often upload a pass hours later. So look back a few hours past the newest frame we
+    # have; anything already stored is ignored on insert.
+    look_from = newest - int(sc.get("upload_lookback_hours", 6) * 3600_000) if newest else None
     spec = spec_for(cfg, sat_row)
     try:
-        frames = client.telemetry(norad, newer_than_ms=newest, max_pages=pages)
+        frames = client.telemetry(norad, newer_than_ms=look_from, max_pages=pages)
     except satnogs.AuthError as e:
         dbm.record_fetch(conn, False, client.last_status, 0, 0, str(e), norad)
         dbm.meta_set(conn, "auth_error", True)

@@ -55,6 +55,18 @@ def test_pipeline():
         assert bt is None or 10 < bt < 30, bt
         # a second fetch straight away is refused politely
         assert fetch.run(cfg, force=False, log=msgs.append) == 0 and "recently" in msgs[-1]
+        # a station uploads an older pass late: the next fetch still collects it
+        newest = conn.execute("SELECT MAX(ts_ms) FROM frames").fetchone()[0]
+        from datetime import datetime, timezone
+        late_ts = datetime.fromtimestamp((newest - 2 * 3600_000) / 1000, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        late = {**frames[0], "timestamp": late_ts, "observer": "Late-Uploader"}
+        frames.append(late)
+        frames.sort(key=lambda f: f["timestamp"], reverse=True)
+        dbm.smeta_set(conn, 60237, "last_attempt_ms", 0)
+        assert fetch.run(cfg, force=True, log=msgs.append) == 0
+        assert conn.execute("SELECT COUNT(*) FROM frames WHERE observer='Late-Uploader'").fetchone()[0] == 1, msgs[-3:]
+        n += 1
+        frames.remove(late)
         # the signed log detects tampering
         logchain.append(conn, "note", {}, "First note", "AM")
         logchain.append(conn, "note", {}, "Second note", "AM")
@@ -320,6 +332,16 @@ def test_model_spaceweather_summary_stream():
             json.loads((tmp / "site" / "api" / f"{f}.json").read_text())
         assert json.loads((tmp / "site" / "api" / "health.json").read_text())["storage"] is None
         assert (tmp / "site" / "api" / "profile" / "bat_t.json").exists()
+        # changes only from the console's own page: JSON, and no foreign Origin
+        def post(headers, body=b'{"kind":"note","msg":"hello","cs":"T"}'):
+            try:
+                return urllib.request.urlopen(urllib.request.Request("http://127.0.0.1:8771/api/log", data=body,
+                                                                     headers=headers, method="POST")).status
+            except urllib.error.HTTPError as e:
+                return e.code
+        assert post({"Content-Type": "text/plain"}) == 403                      # a cross-site form
+        assert post({"Content-Type": "application/json", "Origin": "https://evil.example"}) == 403
+        assert post({"Content-Type": "application/json", "Origin": "http://127.0.0.1:8771"}) == 201
         tr = json.loads(urllib.request.urlopen("http://127.0.0.1:8771/api/track", timeout=30).read())
         assert len(tr["points"]) > 250 and all(-90 <= p[1] <= 90 and -180 <= p[2] <= 180 for p in tr["points"])
         assert (tmp / "site" / "api" / "track.json").exists() and (tmp / "site" / "world.json").exists()
@@ -327,6 +349,39 @@ def test_model_spaceweather_summary_stream():
             j = json.loads(urllib.request.urlopen("http://127.0.0.1:8771" + path, timeout=30).read())
             assert "error" not in j, (path, j)
         web.shutdown()
+    finally:
+        httpd.shutdown()
+        shutil.rmtree(tmp)
+
+
+def test_late_uploads():
+    """A pass uploaded hours late sorts behind frames we already have; the fetch must still get it."""
+    from datetime import datetime, timezone
+    httpd, state, frames = mock_satnogs.serve(8781, page_size=3)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        cfg = make_cfg(tmp, 8781)
+        cfg.data["satnogs"].update(backfill_pages=4, history_pages_per_fetch=0)
+        assert fetch.run(cfg, force=True, log=lambda m: None) == 0
+        conn = dbm.open_db(cfg)
+        newest = conn.execute("SELECT MAX(ts_ms) FROM frames").fetchone()[0]
+        ts = lambda f: datetime.fromisoformat(f["timestamp"].replace("Z", "+00:00")).timestamp() * 1000
+        # the late frame sits behind the first page (3 newer frames) but within the 6 h look-back
+        for hours in [x / 4 for x in range(2, 24)]:
+            late_ms = newest - hours * 3600_000
+            newer = sum(1 for f in frames if ts(f) > late_ms)
+            if 4 <= newer <= 9:
+                break
+        late = {**frames[0], "observer": "Late-Uploader",
+                "timestamp": datetime.fromtimestamp(late_ms / 1000, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+        frames.append(late)
+        frames.sort(key=lambda f: f["timestamp"], reverse=True)
+        dbm.smeta_set(conn, 60237, "last_attempt_ms", 0)
+        assert fetch.run(cfg, force=True, log=lambda m: None) == 0
+        got = conn.execute("SELECT COUNT(*) FROM frames WHERE observer='Late-Uploader'").fetchone()[0]
+        print(f"late upload {hours} h behind the newest frame, behind {newer} newer frames: stored {got}")
+        assert got == 1
     finally:
         httpd.shutdown()
         shutil.rmtree(tmp)
@@ -486,4 +541,5 @@ if __name__ == "__main__":
     test_battery_health()
     test_history_fill()
     test_forensics_and_silence()
+    test_late_uploads()
     print("OK")

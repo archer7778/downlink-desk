@@ -264,8 +264,8 @@ class App:
         with self.ro() as c:
             rep = observation_report(c, self.cfg, now - days * 86_400_000, now, sat["norad"])
             refreshed = dbm.smeta_get(c, sat["norad"], "obs_refreshed_ms")
-        with self.ro() as c:
-            sil = silence(c, self.cfg, sat["norad"], now)
+        sil = self.cached(("silence", sat["norad"]), 300, lambda: self._silence(sat["norad"], now),
+                          self.data_sig(sat["norad"]) + (refreshed, now // 600_000))
         return {"now": now, "observations": rep, "refreshed_ms": refreshed,
                 "silent_streak": [o["id"] for o in sil["streak"]] if sil["silent"] else [], "silent_after": 1,
                 "silence": {k: v for k, v in sil.items() if k != "streak"},
@@ -544,6 +544,17 @@ def make_handler(app):
             self.end_headers()
             self.wfile.write(body)
 
+        def _same_origin(self):
+            """Block other websites from making changes through a visitor's browser (CSRF): the
+            console always sends JSON, which a plain cross-site form can't, and a browser that
+            sends an Origin must be on this console's own address."""
+            if "application/json" not in (self.headers.get("Content-Type") or ""):
+                return False
+            origin = self.headers.get("Origin")
+            if origin:
+                return urlparse(origin).netloc == (self.headers.get("Host") or "")
+            return True
+
         def _authorised(self):
             code = app.cfg["server"]["write_passcode"]
             return not code or hmac.compare_digest(self.headers.get("X-Passcode", ""), str(code))
@@ -626,6 +637,8 @@ def make_handler(app):
             u = urlparse(self.path)
             p = u.path
             q = {k: v[0] for k, v in parse_qs(u.query).items()}
+            if not self._same_origin():
+                return self._json({"error": "Changes are only accepted from this console's own page."}, 403)
             if not self._authorised():
                 return self._json({"error": "This console needs the operator passcode for changes."}, 401)
             try:
