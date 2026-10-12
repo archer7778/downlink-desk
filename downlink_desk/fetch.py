@@ -133,35 +133,64 @@ def store(conn, sat_row, spec, frames):
     return new, new_ids
 
 
+HISTORY_WINDOW_MS = 6 * 3600_000
+HISTORY_MIN_WINDOW_MS = 3600_000
+
+
 def fill_history(conn, cfg, client, sat_row, spec, log, pages=None, days=None):
     """Walk back through older frames on SatNOGS, a few pages at a time, until `history_days`
     are stored (or SatNOGS has nothing older). Old frames feed the health model and the
-    battery check; they never trigger phone alerts. Returns True when history is complete."""
+    battery check; they never trigger phone alerts. Returns True when history is complete.
+
+    It works back in time windows that adapt: a quiet stretch takes one request and the window
+    grows (up to 4 days); a busy one shrinks the window and carries on from the oldest frame it
+    got. Only a flood packed into less than an hour is sampled (its newest pages) and skipped:
+    the model needs frames spread across the weeks, not every copy of one busy hour, and a page
+    budget per fetch keeps the load on SatNOGS fixed."""
     sc = cfg["satnogs"]
     norad = sat_row["norad"]
     days = sc["history_days"] if days is None else days
-    pages = int(sc["history_pages_per_fetch"] if pages is None else pages)
+    budget = int(sc["history_pages_per_fetch"] if pages is None else pages)
     target = dbm.now_ms() - int(days * DAY_MS)
     done = dbm.smeta_get(conn, norad, "history_done_ms")
-    if pages <= 0 or (done is not None and done <= target):
+    if budget <= 0 or (done is not None and done <= target):
         return True
-    oldest = conn.execute("SELECT MIN(ts_ms) FROM frames WHERE norad=?", (norad,)).fetchone()[0]
-    if oldest is None:
-        return False
-    if oldest <= target:
-        dbm.smeta_set(conn, norad, "history_done_ms", target)
-        return True
-    frames = client.telemetry(norad, max_pages=pages, start_ms=target, end_ms=oldest - 1)
-    new, _ = store(conn, sat_row, spec, frames)
+    cursor = dbm.smeta_get(conn, norad, "history_cursor_ms")
+    if cursor is None:   # start just below the oldest frame we have (ignoring any absurdly old one)
+        cursor = conn.execute("SELECT MIN(ts_ms) FROM frames WHERE norad=? AND ts_ms>?", (norad, target)).fetchone()[0]
+        if cursor is None:
+            return False   # nothing stored yet: the regular fetch goes first
+    added, sampled = 0, 0
+    win = dbm.smeta_get(conn, norad, "history_window_ms") or HISTORY_WINDOW_MS
+    while budget > 0 and cursor > target:
+        lo = max(target, cursor - win)
+        frames = client.telemetry(norad, max_pages=min(budget, 3), start_ms=lo, end_ms=cursor - 1)
+        budget -= max(1, getattr(client, "pages_used", 1))
+        new, _ = store(conn, sat_row, spec, frames)
+        added += new
+        got = [t for t in (satnogs.parse_ts(f.get("timestamp")) for f in frames) if t]
+        if getattr(client, "exhausted", True):
+            if getattr(client, "pages_used", 1) <= 1:
+                win = min(4 * DAY_MS, win * 2)       # quiet: take bigger steps
+            cursor = lo
+        elif win > HISTORY_MIN_WINDOW_MS and got and lo < min(got) < cursor:
+            # busier than one look can cover: keep what came back and look at shorter stretches
+            cursor = min(got)
+            win = max(HISTORY_MIN_WINDOW_MS, win // 2)
+        else:
+            # a flood packed into under an hour: what came back is a fair sample; skip the rest
+            sampled += 1
+            cursor = lo
+        dbm.smeta_set(conn, norad, "history_cursor_ms", cursor)
+        dbm.smeta_set(conn, norad, "history_window_ms", win)
     baseline.fill_phases(conn, norad)
-    older = [satnogs.parse_ts(f.get("timestamp")) for f in frames]
-    older = min([t for t in older if t], default=None)
-    if getattr(client, "exhausted", False) or older is None or older >= oldest:   # nothing older in the window
+    when = time.strftime("%Y-%m-%d %H:%M", time.gmtime(cursor / 1000))
+    if cursor <= target:
         dbm.smeta_set(conn, norad, "history_done_ms", target)
-        log(f"[{norad}] History complete back to {time.strftime('%Y-%m-%d', time.gmtime((older or oldest) / 1000))}.")
+        log(f"[{norad}] History complete back to {when[:10]} ({added} older frames in this step).")
         return True
-    log(f"[{norad}] History: {new} older frames added, now back to "
-        f"{time.strftime('%Y-%m-%d %H:%M', time.gmtime((older or oldest) / 1000))} UTC.")
+    log(f"[{norad}] History: {added} older frames added, now back to {when} UTC"
+        + (" (a busy period was sampled rather than read in full)." if sampled else "."))
     return False
 
 
