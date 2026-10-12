@@ -342,6 +342,18 @@ def test_model_spaceweather_summary_stream():
         assert post({"Content-Type": "text/plain"}) == 403                      # a cross-site form
         assert post({"Content-Type": "application/json", "Origin": "https://evil.example"}) == 403
         assert post({"Content-Type": "application/json", "Origin": "http://127.0.0.1:8771"}) == 201
+        assert post({"Content-Type": "application/json"}, b"[1,2,3]") == 400                    # not an object
+        assert post({"Content-Type": "application/json", "Content-Length": "-1"}, b"") in (400, 411)
+        # hostile or broken inputs
+        from downlink_desk.server import _cell, _finite
+        assert _finite({"a": float("nan"), "b": [1.0, float("inf")]}) == {"a": None, "b": [1.0, None]}
+        assert _cell("=HYPERLINK(1)") == "'=HYPERLINK(1)" and _cell("Piszkesteto") == "Piszkesteto"
+        assert spacewx.parse_kp([{"time_tag": "2026-10-10T00:00:00", "Kp": "NaN"},
+                                 {"time_tag": "2026-10-10T03:00:00", "Kp": 99}]) == []
+        lim = json.loads(urllib.request.urlopen("http://127.0.0.1:8771/api/frames?limit=-5", timeout=15).read())
+        assert len(lim) == 1                                                                     # no "LIMIT -5" = everything
+        csv_text = urllib.request.urlopen("http://127.0.0.1:8771/api/export/telemetry.csv", timeout=30).read().decode()
+        assert csv_text.startswith("utc,observer,frame_type") and csv_text.count("\n") > 900
         tr = json.loads(urllib.request.urlopen("http://127.0.0.1:8771/api/track", timeout=30).read())
         assert len(tr["points"]) > 250 and all(-90 <= p[1] <= 90 and -180 <= p[2] <= 180 for p in tr["points"])
         assert (tmp / "site" / "api" / "track.json").exists() and (tmp / "site" / "world.json").exists()
@@ -429,6 +441,17 @@ def test_forensics_and_silence():
         assert len(got) == 5
         assert all(min(abs(f["t"] - b) for b in boots) < 6 * 60_000 for f in got)   # within the 0.1 h rounding
         assert r["stats"]["in_saa"] == 4 and r["stats"]["saa_p_value"] < 0.05
+        # frames only count for the station that was scheduled; others' frames still prove it's alive
+        from downlink_desk.analysis import observation_report, silence
+        t0 = now - 5 * 3600_000
+        conn.execute("INSERT INTO observations(id,start_ms,end_ms,station_id,station_name,lat,lng,max_alt,mode,fetched_ms,norad)"
+                     " VALUES(1,?,?,7,'Quiet Station',0,0,45,'',?,60237)", (t0, t0 + 600_000, now))
+        conn.execute("INSERT INTO frames(ts_ms,frame_hex,decoded_ok,fetched_ms,norad,observer) VALUES(?,'aa',1,?,60237,'Other-AB12cd')",
+                     (t0 + 60_000, now))
+        conn.commit()
+        o = [x for x in observation_report(conn, cfg, now - 86_400_000, now, 60237) if x["id"] == 1][0]
+        assert o["status"] == "nothing" and o["frames"] == 0 and o["others"] == 1, o
+        assert silence(conn, cfg, 60237, now)["misses"] == 0   # it was alive then, so that's no evidence of silence
         # silence: the same three misses mean very different things from good and flaky stations
         def obs(station, status, i):
             return {"id": i, "station": station, "status": status, "max_alt": 40, "end": i}

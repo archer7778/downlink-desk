@@ -11,5 +11,13 @@ ExecStart=@ROOT@/.venv/bin/python -m downlink_desk.server
 Restart=on-failure
 RestartSec=10
 
+# Sandboxing: no privilege gain, a private /tmp, and the operating system read-only.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+
 [Install]
 WantedBy=multi-user.target

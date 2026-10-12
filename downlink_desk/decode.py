@@ -27,9 +27,10 @@ def decode(decoder_name, frame_hex):
 
 
 def clean(fields):
-    """Keep JSON-friendly scalars; drop protocol noise."""
+    """Keep JSON-friendly scalars; drop protocol noise. Capped, since frames come from anyone."""
     out = {}
-    for k, v in fields.items():
+    for k, v in list(fields.items())[:300]:
+        k = str(k)[:80]
         if isinstance(v, bool):
             v = int(v)
         if isinstance(v, (int, float)) and math.isfinite(v):

@@ -9,6 +9,7 @@ Fetched every 3 hours, a few hundred kB at most, and stored in the same database
 """
 import datetime as _dt
 import json
+import math
 import urllib.request
 
 from . import __version__
@@ -44,7 +45,9 @@ def parse_kp(data):
                 if row[0] == "time_tag":
                     continue
                 t, v = row[0], row[1]
-            out.append((_t(t), float(v)))
+            v = float(v)
+            if math.isfinite(v) and 0 <= v <= 9:
+                out.append((_t(t), v))
         except (ValueError, TypeError, IndexError, KeyError):
             continue
     return out
@@ -54,7 +57,9 @@ def parse_f107(data):
     out = []
     for row in data or []:
         try:
-            out.append((_t(row["time_tag"]), float(row["flux"])))
+            v = float(row["flux"])
+            if math.isfinite(v) and 0 < v < 1000:
+                out.append((_t(row["time_tag"]), v))
         except (ValueError, TypeError, KeyError):
             continue
     return out
@@ -69,7 +74,7 @@ def parse_xray(data):
                 continue
             t = _t(row["time_tag"]) // 1_800_000 * 1_800_000
             f = float(row["flux"])
-            if f > 0:
+            if math.isfinite(f) and 0 < f < 1:
                 peaks[t] = max(peaks.get(t, 0), f)
         except (ValueError, TypeError, KeyError, AttributeError):
             continue

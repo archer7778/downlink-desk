@@ -12,8 +12,13 @@ def observation_report(conn, cfg, since_ms, now_ms, norad):
     out = []
     for o in conn.execute("SELECT * FROM observations WHERE end_ms>? AND norad=? ORDER BY start_ms",
                           (since_ms, norad)).fetchall():
-        n, ok = conn.execute("SELECT COUNT(*), COALESCE(SUM(decoded_ok),0) FROM frames WHERE norad=? AND ts_ms BETWEEN ? AND ?",
-                             (norad, o["start_ms"] - WINDOW_PAD, o["end_ms"] + WINDOW_PAD)).fetchone()
+        # Only this station's frames count as this observation being heard. SatNOGS names uploads
+        # "Station-GRID" and the schedule says "Station"; frames from other stations at the same
+        # time are kept as `others` (they show the satellite was alive, not that this station heard it).
+        rows = conn.execute("SELECT observer, decoded_ok FROM frames WHERE norad=? AND ts_ms BETWEEN ? AND ?",
+                            (norad, o["start_ms"] - WINDOW_PAD, o["end_ms"] + WINDOW_PAD)).fetchall()
+        own = [r for r in rows if same_station(r[0], o["station_name"])]
+        n, ok = len(own), sum(r[1] for r in own)
         if now_ms < o["start_ms"]:
             status = "scheduled"
         elif now_ms <= o["end_ms"]:
@@ -26,8 +31,13 @@ def observation_report(conn, cfg, since_ms, now_ms, norad):
             status = "nothing"
         out.append({"id": o["id"], "start": o["start_ms"], "end": o["end_ms"], "station": o["station_name"],
                     "station_id": o["station_id"], "lat": o["lat"], "lng": o["lng"], "max_alt": o["max_alt"],
-                    "mode": o["mode"], "frames": n, "decoded": ok, "status": status})
+                    "mode": o["mode"], "frames": n, "decoded": ok, "others": len(rows) - n, "status": status})
     return out
+
+
+def same_station(observer, station):
+    o, s = (observer or "").strip().lower(), (station or "").strip().lower()
+    return bool(s) and (o == s or o.startswith(s + "-"))
 
 
 def silent_streak(report, cfg):
@@ -88,7 +98,7 @@ def silence_probability(report, cfg, prior=0.02, strength=4.0):
     rate = {k: (h + strength * pg) / (n + strength) for k, (h, n) in st.items()}
     streak = []
     for o in reversed(done):
-        if o["status"] == "heard":
+        if o["status"] == "heard" or o.get("others"):
             break
         streak.append(o)
     lr = 1.0
@@ -106,7 +116,10 @@ def silence(conn, cfg, norad, now):
     """Silent-satellite verdict: the Bayesian probability over the last month of observations, with
     the plain 'N misses in a row' rule as a fallback when there's no track record yet."""
     rep = observation_report(conn, cfg, now - 30 * 86_400_000, now, norad)
-    streak = silent_streak(rep, cfg)
+    # Only misses after the last frame anyone received count: a frame from any station proves it
+    # was alive then, even if the scheduled station heard nothing.
+    last = conn.execute("SELECT MAX(ts_ms) FROM frames WHERE norad=?", (norad,)).fetchone()[0] or 0
+    streak = [o for o in silent_streak(rep, cfg) if o["start"] > last]
     p = silence_probability(rep, cfg)
     thr = cfg["alerts"].get("silent_probability", 0.8)
     if p["probability"] is not None and p.get("stations", 0) and len(rep) >= 5:

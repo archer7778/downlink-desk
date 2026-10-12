@@ -463,6 +463,7 @@ pre.sum{margin:0;padding:12px 14px;font:12.5px/1.6 var(--f-mono);white-space:pre
 'use strict';
 /* ---------- utilities ---------- */
 const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
+const safeUrl=u=>/^https?:\/\//i.test(String(u||''))?String(u):'';   // links from SatNOGS data: never javascript: URLs
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const pad=n=>String(n).padStart(2,'0');
 const fmtT=t=>{const d=new Date(t);return pad(d.getUTCHours())+':'+pad(d.getUTCMinutes())+':'+pad(d.getUTCSeconds())+'Z'};
@@ -757,7 +758,7 @@ function renderCatalog(){
   let h='';
   if(feat.length)h+=`<div class="stack" style="gap:8px"><span class="label">Featured · work well with this console</span><div class="cards">${feat.map(e=>`<div class="card"><h3>${esc(e.name)}</h3>
     <div class="facts">${esc([e.size,e.builder,e.country].filter(Boolean).join(' · '))}<br>Launched ${esc(e.launched||'—')} · NORAD ${e.norad}</div>
-    <p>${esc(e.bio||'')}</p><div class="row">${btn(e)}${e.website?`<a href="${esc(e.website)}" target="_blank" rel="noopener">Team site</a>`:''}${sat(e)}</div></div>`).join('')}</div></div>`;
+    <p>${esc(e.bio||'')}</p><div class="row">${btn(e)}${safeUrl(e.website)?`<a href="${esc(safeUrl(e.website))}" target="_blank" rel="noopener">Team site</a>`:''}${sat(e)}</div></div>`).join('')}</div></div>`;
   h+=`<div class="stack" style="gap:8px"><span class="label">Everything else in orbit that this Pi can decode (${rest.length})</span>`+
     (rest.length?`<div class="dt"><table style="min-width:560px"><thead><tr><th>Satellite</th><th>Country</th><th>Launched</th><th>Decoder</th><th></th></tr></thead><tbody>${rest.slice(0,300).map(e=>`<tr><td><b>${esc(e.name)}</b>${e.names?`<div class="note">${esc(e.names)}</div>`:''}</td><td>${esc(e.countries||'—')}</td><td class="mono">${esc(e.launched||'—')}</td><td class="mono">${esc(e.decoder)}</td><td style="text-align:right;white-space:nowrap">${btn(e)} ${sat(e)}</td></tr>`).join('')}</tbody></table></div>`
       :`<p class="note">${CATALOG.some(e=>!e.featured)?'No matches.':'The full list downloads from SatNOGS with the next fetch (once a day).'}</p>`)+
@@ -774,7 +775,7 @@ function renderBio(){
   const f=FLEET.find(x=>x.norad===SAT)||{name:CONF.satellite.name};const facts=[f.size,f.builder,f.country,f.launched?'launched '+f.launched:''].filter(Boolean).join(' · ');
   $('#bioPanel').innerHTML=`<div class="biocard"><div class="stack" style="gap:8px"><span class="label">The satellite</span><h3 style="font:600 24px/1.1 var(--f-display)">${esc(f.name)}</h3>
     <span class="facts mono note">${esc(facts||'NORAD '+SAT)}</span><p>${esc(f.bio||'No profile written for this satellite yet. Its data uses automatic channels straight from the community decoder.')}</p>
-    <div class="row">${f.website?`<a href="${esc(f.website)}" target="_blank" rel="noopener">Team site</a>`:''}<a href="https://db.satnogs.org/satellite/${SAT}" target="_blank" rel="noopener">SatNOGS page</a></div></div>
+    <div class="row">${safeUrl(f.website)?`<a href="${esc(safeUrl(f.website))}" target="_blank" rel="noopener">Team site</a>`:''}<a href="https://db.satnogs.org/satellite/${SAT}" target="_blank" rel="noopener">SatNOGS page</a></div></div>
     <div class="stack" style="gap:8px">${FLEET.filter(x=>x.enabled).length>1?`<button class="btn" id="untrack">Stop tracking</button><span class="note">Keeps its stored data.</span>`:''}</div></div>`;
 }
 
@@ -791,7 +792,7 @@ function renderObs(now){
   $('#obsNote').textContent=(day.length?`Last 48 h: ${ok} of ${day.length} finished observations delivered frames (${Math.round(ok/day.length*100)}%)`:'SatNOGS stations scheduled to listen, and what each delivered')+(SL&&SL.misses?` · ${SL.misses} miss${SL.misses>1?'es':''} since it was last heard: ${SL.probability!=null?Math.round(SL.probability*100)+'% chance it has really gone quiet (weighing each station’s track record)':'too little history to judge'}`:'');
   const silent=new Set(OBS.silent_streak||[]),missed=new Set(OBS.missed_run||[]);
   const row=o=>{const [cls,lab]=OBS_LABEL[o.status]||['',o.status];const when=o.status==='scheduled'?`in ${dur(o.start-now)}`:'';
-    const res=o.status==='heard'?`${o.frames} frame${o.frames>1?'s':''}, ${o.decoded} decoded`:o.status==='awaiting'?'stations upload after the pass':o.status==='nothing'?(silent.has(o.id)?'part of a silent run':missed.has(o.id)?'missed since last heard':''):when;
+    const res=o.status==='heard'?`${o.frames} frame${o.frames>1?'s':''}, ${o.decoded} decoded`:o.status==='awaiting'?'stations upload after the pass':o.status==='nothing'?(silent.has(o.id)?'part of a silent run':o.others?`other stations heard it (${o.others} frame${o.others>1?'s':''})`:missed.has(o.id)?'missed since last heard':''):when;
     return `<tr class="${o.end>now?'upcoming':''}"><td class="mono">${fmtDT(o.start)}–${fmtHM(o.end)}</td><td>${esc(o.station||'—')}</td><td class="mono">${o.max_alt!=null?Math.round(o.max_alt)+'°':'—'}</td><td><span class="pill ${cls}">${lab}</span> <span class="note">${esc(res)}</span></td></tr>`};
   $('#obsBody').innerHTML=(future.map(row).join('')+past.map(row).join(''))||'<tr><td colspan="4" class="empty">No observations of this satellite are scheduled on SatNOGS right now. Frames still arrive whenever a station happens to record it.</td></tr>';
 }
@@ -911,7 +912,7 @@ async function sha256hex(s){try{if(crypto.subtle){const b=await crypto.subtle.di
 function renderAbout(){
   renderBio();
   const s=CONF.satellite,sat=(HEALTH&&HEALTH.satellite)||{};$$('.satname').forEach(e=>e.textContent=s.name);
-  $('#satCredit').innerHTML=sat.website?`${esc(s.name)} is operated by its own team; see <a href="${esc(sat.website)}" target="_blank" rel="noopener">${esc(sat.website)}</a>.`:'';
+  $('#satCredit').innerHTML=safeUrl(sat.website)?`${esc(s.name)} is operated by its own team; see <a href="${esc(safeUrl(sat.website))}" target="_blank" rel="noopener">${esc(sat.website)}</a>.`:'';
   $('#specNote').textContent=CONF.spec.notes||'';
   $('#specBody').innerHTML=CH.map(c=>`<tr><td>${esc(c.name)}</td><td class="mono">${esc((c.fields||[c.field]).join(', '))}</td><td class="mono">${esc(c.transform||'none')}</td><td class="mono">${esc(c.unit)}</td><td class="mono">${limTxt(c.lim)}</td></tr>`).join('');
   $('#sysKv').innerHTML=[['Satellite',`${s.name} · NORAD ${s.norad} · decoder ${s.decoder}`],['SatNOGS status',sat.status||'—'],['Station',`${CONF.station.name} (${CONF.station.lat}, ${CONF.station.lon})`],['Fetch interval',CONF.poll_minutes+' min'],['Phone alerts',CONF.phone_alerts?'On (ntfy)':'Off. Set ntfy_topic in config.toml to get alarms on your phone'],['Downlink Desk',CONF.version+(HEALTH&&HEALTH.update?` · ${HEALTH.update.message} (checked ${ago(Date.now()-HEALTH.update.t_ms)} ago)`:'')+(HEALTH?(HEALTH.auto_update?' · updates itself after boot and nightly':' · automatic updates off'):'')],['Storage',HEALTH?sdText(HEALTH.storage):'—'],['Commissioned',CONF.commissioned_ms?fmtDT(CONF.commissioned_ms):'—']].map(([k,v])=>`<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('');
@@ -1253,6 +1254,9 @@ function addTelemetry(j){
   for(const ch of touched){const s=SERIES[ch];s.sort((a,b)=>a[0]-b[0]);let w=0;for(let i=0;i<s.length;i++){if(w&&s[i][0]===s[w-1][0])continue;s[w++]=s[i]}s.length=w}
   let fr=false;for(const f of j.frames){if(f[1]<keep||FRAME_IDS.has(f[0]))continue;FRAME_IDS.add(f[0]);FRAMES.push(f);fr=true;if(f[5]!=null)SUNLIT_AT.set(f[1],f[5])}
   if(fr)FRAMES.sort((a,b)=>a[1]-b[1]);
+  // a console left open for weeks keeps only the last 8 days in memory
+  for(const ch in SERIES){const s=SERIES[ch];let k=0;while(k<s.length&&s[k][0]<keep)k++;if(k)s.splice(0,k)}
+  {let k=0;while(k<FRAMES.length&&FRAMES[k][1]<keep){FRAME_IDS.delete(FRAMES[k][0]);k++}if(k)FRAMES.splice(0,k)}
   if(j.max_id)MAXID=Math.max(MAXID,j.max_id);
   if(added||fr)DATAV++;
 }

@@ -24,7 +24,8 @@ DAY = 86_400_000
 
 def _w(path, obj):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(obj, separators=(",", ":")), encoding="utf-8")
+    from .server import _finite
+    path.write_text(json.dumps(_finite(obj), separators=(",", ":"), allow_nan=False), encoding="utf-8")
 
 
 def export(cfg, out, refresh_hours=6, log=print):
