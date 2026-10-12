@@ -96,6 +96,7 @@ def silence_probability(report, cfg, prior=0.02, strength=4.0):
         lr *= 1 / max(0.03, 1 - min(0.97, rate[o["station"]]))
     odds = prior / (1 - prior) * lr
     return {"probability": round(odds / (1 + odds), 3), "misses": len(streak),
+            "station_rates": {k: {"heard": h, "tries": n, "rate": round(rate[k], 3)} for k, (h, n) in st.items()},
             "expected_hits": round(sum(rate[o["station"]] for o in streak), 2),
             "network_hit_rate": round(pg, 3), "stations": len(st),
             "last_heard": next((o["end"] for o in reversed(done) if o["status"] == "heard"), None)}

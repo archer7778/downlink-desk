@@ -9,7 +9,7 @@ DEFAULTS = {
                   "channels": "channels/grbbeta.json"},
     "satnogs": {"api": "https://db.satnogs.org/api", "network_api": "https://network.satnogs.org/api",
                 "token_file": "secrets/satnogs_token",
-                "poll_minutes": 30, "max_pages": 3, "backfill_pages": 6,
+                "poll_minutes": 30, "max_pages": 4, "backfill_pages": 6, "upload_lookback_hours": 6,
                 "history_days": 21, "history_pages_per_fetch": 8},
     "station": {"name": "Home", "lat": 0.0, "lon": 0.0, "alt_m": 0.0, "min_elevation": 10.0},
     "server": {"host": "0.0.0.0", "port": 8080, "write_passcode": ""},

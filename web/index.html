@@ -393,7 +393,7 @@ pre.sum{margin:0;padding:12px 14px;font:12.5px/1.6 var(--f-mono);white-space:pre
     </div>
     <div class="panel">
       <div class="ph"><h2>Stations that heard it</h2><span class="sub">Last 7 days</span></div>
-      <div class="dt"><table><thead><tr><th>Station</th><th>Frames</th><th>Decoded</th><th>Last heard</th></tr></thead><tbody id="stationBody"></tbody></table></div>
+      <div class="dt"><table><thead><tr><th>Station</th><th>Frames</th><th>Decoded</th><th title="Of its scheduled, reasonably high observations in the last 30 days, how many heard the satellite. The silence check weighs each miss by this.">Hit rate (30 d)</th><th>Last heard</th></tr></thead><tbody id="stationBody"></tbody></table></div>
     </div>
   </section>
 
@@ -818,7 +818,9 @@ function renderPasses(now){
   const rows=P&&P.passes?P.passes.filter(p=>p.los>now):[];
   $('#passBody').innerHTML=rows.map(p=>`<tr><td class="mono">${fmtDT(p.aos)}</td><td class="mono">${fmtHM(p.los)}</td><td class="mono">${Math.round((p.los-p.aos)/MIN)} min</td><td class="mono">${p.max_el}°</td><td class="mono">${p.az_aos}°</td><td class="mono">${p.az_los}°</td><td class="mono">${p.aos<=now?'<span class="pill ok">Up now</span>':dur(p.aos-now)}</td></tr>`).join('')||`<tr><td colspan="7" class="empty">${esc((P&&P.note)||'No passes above the minimum elevation in the next 36 hours.')}</td></tr>`;
   const st={};for(const f of FRAMES){if(f[1]<now-7*DAY)continue;const s=st[f[2]||'unknown']||(st[f[2]||'unknown']={n:0,ok:0,last:0});s.n++;s.ok+=f[4];s.last=Math.max(s.last,f[1])}
-  $('#stationBody').innerHTML=Object.entries(st).sort((a,b)=>b[1].last-a[1].last).map(([k,s])=>`<tr><td>${esc(k)}</td><td class="mono">${s.n}</td><td class="mono">${s.ok}</td><td class="mono">${fmtDT(s.last)} (${ago(now-s.last)} ago)</td></tr>`).join('')||'<tr><td colspan="4" class="empty">No stations yet.</td></tr>';
+  const SR=(OBS&&OBS.silence&&OBS.silence.station_rates)||{};
+  const rateOf=obs=>{for(const k in SR)if(obs===k||obs.startsWith(k+'-'))return SR[k];return null};   // frames say "Name-GRID", the schedule says "Name"
+  $('#stationBody').innerHTML=Object.entries(st).sort((a,b)=>b[1].last-a[1].last).map(([k,s])=>{const r=rateOf(k);return `<tr><td>${esc(k)}</td><td class="mono">${s.n}</td><td class="mono">${s.ok}</td><td class="mono">${r?`${Math.round(r.heard/r.tries*100)}% <span class="note">(${r.heard} of ${r.tries})</span>`:'<span class="note">not scheduled</span>'}</td><td class="mono">${fmtDT(s.last)} (${ago(now-s.last)} ago)</td></tr>`}).join('')||'<tr><td colspan="5" class="empty">No stations yet.</td></tr>';
 }
 
 /* ---------- drawer ---------- */
