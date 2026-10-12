@@ -406,7 +406,7 @@ class App:
             return out
         s = dict(self.cached("summary", 900, build, self.data_sig()))
         s["phone"] = bool(str(self.cfg["notify"].get("ntfy_topic") or "").strip())
-        s["timezone"] = str(self.cfg["notify"].get("timezone") or "") or "the Pi's local time"
+        s["timezone"] = str(self.cfg["notify"].get("timezone") or "") or "the server's local time"
         return s
 
     # ---------- live stream: one watcher thread shared by every open console ----------
@@ -663,7 +663,7 @@ def make_handler(app):
             except Exception:   # never drop the connection without an answer; the detail goes to the log
                 import traceback
                 traceback.print_exc()
-                return self._json({"error": "internal error (details in the Pi's log)"}, 500)
+                return self._json({"error": "internal error (details in the server's log)"}, 500)
 
         def do_POST(self):
             u = urlparse(self.path)
@@ -709,7 +709,7 @@ def make_handler(app):
             except Exception:
                 import traceback
                 traceback.print_exc()
-                return self._json({"error": "internal error (details in the Pi's log)"}, 500)
+                return self._json({"error": "internal error (details in the server's log)"}, 500)
 
         def _event(self, name, data):
             self.wfile.write(f"event: {name}\ndata: {json.dumps(data, separators=(',', ':'))}\n\n".encode())

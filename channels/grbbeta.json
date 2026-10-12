@@ -36,7 +36,8 @@
       "transform": "none",
       "unit": "",
       "dp": 0,
-      "lim": null
+      "lim": null,
+      "note": "The number the power unit sends. Its scale isn't published; the battery tab assumes 0.5 mV per count (about 8.2 V)."
     },
     {
       "id": "bat_chg",
@@ -63,7 +64,8 @@
       "field": "psu_pv_in_power1",
       "unit": "",
       "dp": 0,
-      "lim": null
+      "lim": null,
+      "note": "Raw solar-panel input from the power unit; its scale isn't published. Zero in Earth's shadow."
     },
     {
       "id": "pv2",
@@ -72,7 +74,8 @@
       "field": "psu_pv_in_power2",
       "unit": "",
       "dp": 0,
-      "lim": null
+      "lim": null,
+      "note": "Raw solar-panel input from the power unit; its scale isn't published. Zero in Earth's shadow."
     },
     {
       "id": "psu_resets",
@@ -82,7 +85,8 @@
       "unit": "",
       "dp": 0,
       "lim": null,
-      "counter": "reboot"
+      "counter": "reboot",
+      "note": "How many times the power unit has reset since launch. A rise means it restarted."
     },
     {
       "id": "bat_t",
@@ -196,7 +200,8 @@
       "lim": null,
       "transform": "scale",
       "scale": 0.5,
-      "offset": -134
+      "offset": -134,
+      "note": "Signal level the satellite's own receiver hears. Around −110 dBm is a quiet band; higher means interference or a strong uplink."
     },
     {
       "id": "uhf_up",
@@ -227,7 +232,8 @@
       "unit": "",
       "dp": 0,
       "lim": null,
-      "model": false
+      "model": false,
+      "note": "Messages radio amateurs have relayed through the satellite's digipeater since its last reset."
     },
     {
       "id": "vhf_up",

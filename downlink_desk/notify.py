@@ -131,9 +131,9 @@ def storage_check(conn, cfg, log=print):
     st = dbm.storage(conn, cfg.db_path)
     if st.get("level") in ("warn", "crit") and _once(conn, f"disk:{dbm.now_ms() // 86_400_000}"):
         gb = lambda b: f"{b / 1e9:.1f} GB"
-        if send(cfg, "Downlink Desk: SD card nearly full",
+        if send(cfg, "Downlink Desk: disk nearly full",
                 f"{gb(st['disk_free'])} free of {gb(st['disk_total'])}. The database is {st['db_bytes'] / 1e6:.0f} MB. "
-                "Free some space on the Pi, or move to a bigger card.", "high" if st["level"] == "crit" else "default",
+                "Free some space on the server, or move to a bigger disk.", "high" if st["level"] == "crit" else "default",
                 "floppy_disk"):
-            log("Sent SD card warning.")
+            log("Sent disk space warning.")
     return st

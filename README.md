@@ -6,6 +6,8 @@ Downlink Desk watches real CubeSats in orbit. It pulls their telemetry from the 
 
 It's plain Python and SQLite, so it runs on any Linux machine: a desktop, a server, or something as small as a Raspberry Pi. Mine runs on a Pi Zero 2 W, which it barely touches (load average 0.00, about 150 MB of RAM, roughly 1.5 GB of data a year for a busy CubeSat).
 
+**See it running on real data, no install:** <https://archer7778.github.io/downlink-desk/> (rebuilt every 6 hours from real GRBBeta telemetry). To practise with simulated faults, try the [training simulator](https://archer7778.github.io/downlink-desk/training).
+
 ![Downlink Desk console showing live GRBBeta telemetry from SatNOGS](docs/screenshot.png)
 *Live data from a station in Da Nang: GRBBeta, a 2U CubeSat from Slovakia, over the South Atlantic Anomaly, 25 minutes before the Piszkéstető station in Hungary hears it (the bold arc).*
 
@@ -14,9 +16,9 @@ It's plain Python and SQLite, so it runs on any Linux machine: a desktop, a serv
 **Knows what normal looks like**
 - **Learned thermal and power model.** A small satellite warms in sunlight and cools in Earth's shadow every 95 minutes. For each channel it learns the typical value at each point of that cycle, corrects for the shadow growing and shrinking through the seasons, and compares the last two days with the three weeks before. A battery running 3 °C warmer than it used to at the same point in the orbit is still far inside its limits; this catches it anyway.
 - **Orbit profile charts:** each channel plotted against minutes since sunrise, with the learned curve, its normal spread, and the latest readings on top.
-- **Drift and oddity alerts** when a channel moves away from its own history, separate from the fixed limits, with a 90% range on every shift and an estimate of when it began.
-- **Restart forensics:** the exact moment each subsystem restarted (frame time minus its uptime counter), where the satellite was, and the space weather at the time, plus a test of whether restarts cluster over the South Atlantic Anomaly more than chance allows. Restarts are marked on the globe.
-- **Silence you can trust:** instead of "three misses in a row", the probability the satellite has really gone quiet, weighing each SatNOGS station's own track record (a miss by a station that always hears it counts for far more than one by a station that often misses).
+- **Drift and unusual-reading flags** when a channel moves away from its own history, separate from the fixed limits, with a 90% range on every shift and an estimate of when it began. Drifts are pushed to your phone and shown on the console's spacecraft status.
+- **Restart forensics:** the exact moment each subsystem restarted (frame time minus its uptime counter), where the satellite was, and the space weather at the time, plus a test of whether restarts cluster over the South Atlantic Anomaly more than chance allows. A single misread value or a counter rolling over isn't counted. Restarts are marked on the globe.
+- **Silent-satellite alarm you can trust:** instead of "three misses in a row", the probability the satellite has really gone quiet, weighing each SatNOGS station's own track record (a miss by a station that always hears it counts for far more than one by a station that often misses).
 
 **Checks the battery**
 - **Battery health tab:** charge in and out around a whole orbit, how deep each eclipse drains the battery, whether it gets back to full in sunlight, voltage left at the end of eclipse and its trend, time spent outside lithium-ion's safe temperatures, and an effective internal resistance that rises as cells age.
@@ -30,10 +32,10 @@ It's plain Python and SQLite, so it runs on any Linux machine: a desktop, a serv
 - **Ground stations and the next downlink:** SatNOGS stations from the live schedule appear on the globe: the next one to listen (with the stretch of orbit it will hear drawn bold), any listening right now (linked to the satellite), and those that heard it today. Underneath, a ticking countdown to the next downlinks.
 
 **Watches the satellite and the network**
-- **Live feed:** frames appear in every open console the moment they're stored (server-sent events).
-- **Expected vs received:** reads the SatNOGS Network schedule, so it knows which stations will listen and when, scores every observation as heard or empty, and counts down to the next data.
-- **Silent-satellite alarm** when several scheduled observations in a row hear nothing, and fetch-health alerts when the fetch job can't reach SatNOGS.
-- **Limits and restarts:** caution and alarm limits per channel (or learned from the data in one click), and restart detection from the spacecraft's boot counters.
+- **Live feed:** frames appear in every open console the moment they're stored, with no page refresh.
+- **Expected vs received:** reads the SatNOGS Network schedule, so it knows which stations will listen and when, and scores every observation as heard or empty (this feeds the silence check above).
+- **Limits:** caution and alarm limits per channel, set by hand or suggested from the data in one click. Channels without limits say so rather than showing "nominal".
+- **Fetch-health alerts** when the console can't reach SatNOGS or the API key is rejected.
 
 **Puts it in context**
 - **Space weather from NOAA:** geomagnetic storms (Kp and the G1–G5 scale), solar flares from GOES X-ray data, and solar flux, marked on every channel's chart so you can see whether that odd reading lined up with a storm.
@@ -42,20 +44,17 @@ It's plain Python and SQLite, so it runs on any Linux machine: a desktop, a serv
 
 **Runs like a real operations desk**
 - **Morning summary on your phone** through the free ntfy app: last night's frames, stations, restarts, drifts, storms and the day's best pass. Alarms, restarts and silence are pushed as they happen.
-- **A signed audit trail:** every acknowledgement, shelve, limit change and handover is hash-chained, so an edit or deletion shows up on verify.
+- **A signed audit trail:** every acknowledgement, shelved (temporarily silenced) alert, limit change and handover is recorded, and each entry carries a fingerprint of the one before it, so an edit or deletion shows up when you verify the log.
 - **Looks after itself:** starts at boot, updates itself from GitHub after boot and nightly (rolling back if the new version doesn't come up), and watches free disk space.
 - **Shift handover report, daily check, equipment status,** and a **training simulator** with fault injection.
 - **Several satellites at once:** a picker with bios for featured CubeSats, and a catalog of every satellite in orbit that SatNOGS can decode.
 
 **Light and efficient**
 - **Fills in its own history:** a new install pulls three weeks of older frames from SatNOGS, a few pages per fetch, so the model and battery check have something to learn from on day one.
-- **Sends only what changed:** an open console asks for frames stored since it last checked (75 bytes when there's nothing new), gets new data and log entries pushed over one shared live stream, and everything is gzip-compressed.
-- **Never makes you wait on a slow sum:** reads run on their own connections alongside the fetch job, and the model, battery check and summary are worked out once per batch of new data, not per request.
-- Measured on three weeks of data (15,500 frames): idle polling down from 160 KB a minute to almost nothing, the morning summary from 287 ms to 3 ms, and browser work while watching down five-fold.
+- **Polite to SatNOGS:** at least 11 seconds between requests, a fetch every 30 minutes, and it backs off when asked.
+- **Cheap to watch:** an open console fetches only what's new and gets updates pushed to it, so leaving it open all day costs almost nothing, even on a small computer.
 
 > ⚠️ **Not flight software.** Downlink Desk is not affiliated with any satellite team, cannot command a spacecraft, and ships with provisional limits chosen for this console rather than the mission's own. Don't use it to make decisions about real hardware.
-
-**See it running on real data, no install:** <https://archer7778.github.io/downlink-desk/>. GitHub rebuilds this live demo every 6 hours with the same code, from real GRBBeta telemetry. To practise with simulated faults instead, try the [training simulator](https://archer7778.github.io/downlink-desk/training).
 
 ## How it works
 
