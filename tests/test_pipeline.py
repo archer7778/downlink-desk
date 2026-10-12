@@ -585,7 +585,55 @@ def test_battery_health():
         assert r["cycles"] > 10_000 and 0.8 < r["life"]["capacity_now"] < 1.0
         assert r["grade"] in ("good", "watch")
         print(" ", battery.summary_line(r))
+        # A full-sunlight season: no sunrise to measure from. It must still be judged, not "learning" forever.
+        conn.execute("UPDATE frames SET phase_min=-1, shadow_min=0")
+        conn.commit()
+        r = battery.analyse(conn, spec, 60237, "2024-07-09")
+        print("full sun:", r["grade"], r.get("balance_mah"), [(c["id"], c["value"]) for c in r["checks"]])
+        assert r["grade"] != "learning" and r["shadow_min"] == 0 and r.get("balance_mah") is not None
+        assert any(c["id"] == "dod" and c["value"] == "0%" for c in r["checks"])
+        assert battery.summary_line(r)
     finally:
+        shutil.rmtree(tmp)
+
+
+def test_network_failures():
+    """SatNOGS (or the network) failing in every way we can think of: the fetch records a failure
+    and carries on, a garbled TLE never replaces a good one, and nothing crashes."""
+    httpd, state, frames = mock_satnogs.serve(8795)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        cfg = make_cfg(tmp, 8795)
+        assert fetch.run(cfg, force=True, log=lambda m: None) == 0
+        conn = dbm.open_db(cfg)
+        good_tle = dbm.smeta_get(conn, 60237, "tle")
+        n0 = conn.execute("SELECT COUNT(*) FROM frames").fetchone()[0]
+        cases = [("/api/telemetry/", "drop", 4), ("/api/telemetry/", "half", 4), ("/api/telemetry/", "html", 4),
+                 ("/api/telemetry/", "500", 4), ("/api/telemetry/", "junk", 0), ("/api/telemetry/", "error_obj", 0),
+                 ("/api/tle/", "badtle", 0), ("/api/tle/", "half", 0), ("/api/satellites/", "junk", 0),
+                 ("/api/satellites/", "error_obj", 0), ("/api/observations/", "junk", 0), ("/api/observations/", "drop", 0),
+                 ("/products/noaa-planetary-k-index.json", "half", 0), ("/json/f107_cm_flux.json", "junk", 0)]
+        for path, mode, want in cases:
+            state["chaos"] = {path: mode}
+            for k in ("last_attempt_ms", "meta_refreshed_ms", "obs_refreshed_ms"):
+                dbm.smeta_set(conn, 60237, k, 0)
+            dbm.meta_set(conn, "catalog_refreshed_ms", 0)
+            dbm.meta_set(conn, "swx_refreshed_ms", 0)
+            msgs = []
+            rc = fetch.run(cfg, force=True, log=msgs.append)
+            last = conn.execute("SELECT ok, message FROM fetches ORDER BY id DESC LIMIT 1").fetchone()
+            print(f"  {mode:>9} on {path:<40} rc={rc} ok={last['ok']} {last['message'][:70]}")
+            assert rc == want, (path, mode, rc, msgs)
+            assert dbm.smeta_get(conn, 60237, "tle")["tle1"] == good_tle["tle1"]
+            assert not any("Internal error" in m for m in msgs), msgs
+        state["chaos"] = {}
+        assert conn.execute("SELECT COUNT(*) FROM frames").fetchone()[0] >= n0
+        from downlink_desk import catalog
+        assert any(e["norad"] == 60237 for e in catalog.entries(conn, cfg))
+        assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    finally:
+        httpd.shutdown()
         shutil.rmtree(tmp)
 
 
@@ -597,4 +645,5 @@ if __name__ == "__main__":
     test_history_fill()
     test_forensics_and_silence()
     test_late_uploads()
+    test_network_failures()
     print("OK")

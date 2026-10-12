@@ -152,12 +152,12 @@ def _load(conn, norad, b, since, now):
                           f"FROM points p JOIN frames f ON f.id=p.frame_id WHERE p.norad=? AND p.ts_ms>? AND p.ts_ms<=? "
                           f"AND p.channel IN ({q}) ORDER BY p.ts_ms", (norad, since, now, *ids)):
         fr = frames.setdefault(r[0], {"t": r[3], "phase": r[4] if (r[4] is not None and r[4] >= 0) else None,
-                                      "shadow": r[5], "sunlit": r[6]})
+                                      "fullsun": r[4] == -1, "shadow": r[5], "sunlit": r[6]})
         fr[r[1]] = r[2]
     scale = _volt_scale(b, [f[vch] for f in frames.values() if vch in f])
     out = []
     for f in frames.values():
-        out.append({"t": f["t"], "phase": f["phase"], "shadow": f["shadow"], "sunlit": f["sunlit"],
+        out.append({"t": f["t"], "phase": f["phase"], "fullsun": f["fullsun"], "shadow": f["shadow"], "sunlit": f["sunlit"],
                     "v": f[vch] * scale if vch in f and scale else None,
                     "ic": f.get(cch), "id": f.get(dch), "temp": f.get(tch)})
     return sorted(out, key=lambda x: x["t"]), scale
@@ -244,6 +244,14 @@ def analyse(conn, spec, norad, launched=None, now=None):
     for r in recent:
         r["net"] = (r["ic"] - r["id"]) if r["ic"] is not None and r["id"] is not None else None
     phased = [r for r in recent if r["phase"] is not None]
+    sunny = [r for r in recent if r["fullsun"]]
+    if len(sunny) > len(phased):
+        # A full-sunlight season (or a dawn-dusk orbit): there is no sunrise to measure the orbit
+        # from, and nothing changes around it, so any fixed starting point will do. The balance is
+        # then simply the average net current over an orbit; there is no eclipse to discharge in.
+        for r in sunny:
+            r["phase"] = (r["t"] / 60_000) % period
+        phased, shadow = sunny, 0.0
     res = {"available": True, "now": now, "period_min": round(period, 2), "shadow_min": shadow,
            "capacity_mah": round(cap_mah), "volt_scale": scale, "samples": len(recent), "phased": len(phased),
            "window_days": WINDOW_DAYS, "assumptions": {k: v for k, v in b.items() if k != "life"}, "life_params": life_p,

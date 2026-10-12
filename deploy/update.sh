@@ -19,7 +19,7 @@ cfgval() { awk -F= -v k="$1" '$1 ~ "^"k"[ ]*$" {sub(/#.*/,"",$2); gsub(/[ "]/,""
 status() {   # status <result> <message> [from] [to]
   mkdir -p "$ROOT/data"
   printf '{"t_ms":%s,"result":"%s","message":"%s","from":"%s","to":"%s","branch":"%s"}\n' \
-    "$(date +%s%3N)" "$1" "$(printf '%s' "$2" | tr '"\\' "''")" "${3:-}" "${4:-}" "$BRANCH" > "$STATUS"
+    "$(date +%s%3N)" "$1" "$(printf '%s' "$2" | tr '"\\' "''" | tr -d '\000-\037')" "${3:-}" "${4:-}" "$BRANCH" > "$STATUS"
   chown "$USER_NAME" "$STATUS" 2>/dev/null || true
   echo "$2"
 }
@@ -51,9 +51,37 @@ if [ "$AUTO" = "false" ] || [ "${1:-}" = "--check" ]; then
 fi
 
 CHANGED="$(as_user git diff --name-only HEAD "origin/$BRANCH")"
+
+# Don't swap the code under a fetch that's running: take the same lock the fetch job uses
+# (made by the app's user first, so the fetch can still open it afterwards).
+mkdir -p "$ROOT/data" && chown "$USER_NAME" "$ROOT/data" 2>/dev/null
+as_user touch "$ROOT/data/fetch.lock"
+exec 9>>"$ROOT/data/fetch.lock"
+if ! flock -w 900 9; then
+  status held "Not updating right now: a fetch has been running for 15 minutes. Will try again later." "$LOCAL" "$REMOTE"
+  exit 0
+fi
+
+install_units() {
+  for f in deploy/*.service deploy/*.timer; do
+    sed -e "s#@ROOT@#${ROOT}#g" -e "s#@USER@#${USER_NAME}#g" "$f" > "/etc/systemd/system/$(basename "$f")"
+  done
+  POLL="$(cfgval poll_minutes)"; POLL="${POLL%%.*}"
+  [[ "$POLL" =~ ^[0-9]+$ ]] || POLL=30
+  [ "$POLL" -lt 20 ] && POLL=20
+  sed -i "s#^OnUnitActiveSec=.*#OnUnitActiveSec=${POLL}min#" /etc/systemd/system/downlink-desk-fetch.timer
+  systemctl daemon-reload
+}
+
 rollback() {
   as_user git reset -q --hard "$LOCAL"
-  [ "$(id -u)" -eq 0 ] && systemctl restart downlink-desk-web 2>/dev/null
+  if grep -q '^requirements.txt$' <<<"$CHANGED"; then   # best effort: back to the old packages
+    as_user .venv/bin/pip install -q -r requirements.txt >/dev/null 2>&1
+  fi
+  if [ "$(id -u)" -eq 0 ]; then
+    grep -qE '^deploy/.*\.(service|timer)$' <<<"$CHANGED" && install_units
+    systemctl restart downlink-desk-web 2>/dev/null
+  fi
   status failed "Update to $REMOTE failed ($1); rolled back to $LOCAL." "$LOCAL" "$REMOTE"
   exit 1
 }
@@ -66,12 +94,7 @@ as_user .venv/bin/python -c "import downlink_desk.server, downlink_desk.fetch" |
 
 if [ "$(id -u)" -eq 0 ]; then
   if grep -qE '^deploy/.*\.(service|timer)$' <<<"$CHANGED"; then
-    for f in deploy/*.service deploy/*.timer; do
-      sed -e "s#@ROOT@#${ROOT}#g" -e "s#@USER@#${USER_NAME}#g" "$f" > "/etc/systemd/system/$(basename "$f")"
-    done
-    POLL="$(cfgval poll_minutes)"; POLL="${POLL:-30}"; [ "$POLL" -lt 20 ] && POLL=20
-    sed -i "s#^OnUnitActiveSec=.*#OnUnitActiveSec=${POLL}min#" /etc/systemd/system/downlink-desk-fetch.timer
-    systemctl daemon-reload
+    install_units
     systemctl enable downlink-desk-web.service downlink-desk-fetch.timer downlink-desk-update.timer >/dev/null 2>&1
   fi
   systemctl restart downlink-desk-web

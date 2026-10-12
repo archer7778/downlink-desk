@@ -11,6 +11,7 @@ Run by a systemd timer (every `poll_minutes`). Safe to run by hand:
 """
 import argparse
 import fcntl
+import sqlite3
 import json
 import sys
 import time
@@ -19,7 +20,7 @@ from . import baseline, catalog, spacewx, summary
 from . import db as dbm
 from . import decode, notify, satnogs
 from .config import find_config
-from .orbit import tle_epoch_ms
+from .orbit import tle_epoch_ms, valid_tle
 
 DAY_MS = 86_400_000
 AUTO_SPEC = {"channels": [], "frame_types": []}
@@ -42,11 +43,11 @@ def refresh_meta(conn, client, norad, log):
         return
     try:
         sat = client.satellite(norad)
-        if sat:
+        if sat and sat.get("name"):   # not an error object
             dbm.smeta_set(conn, norad, "satellite", {k: sat.get(k) for k in
                           ("sat_id", "name", "status", "is_frequency_violator", "website", "reception_status")})
         t = client.tle(norad)
-        if t and t.get("tle1") and t.get("tle2"):
+        if t and valid_tle(t.get("tle1"), t.get("tle2")):
             dbm.smeta_set(conn, norad, "tle", {"tle1": t["tle1"], "tle2": t["tle2"], "source": t.get("tle_source"),
                                               "updated": t.get("updated"), "epoch_ms": tle_epoch_ms(t["tle1"])})
         dbm.smeta_set(conn, norad, "meta_refreshed_ms", dbm.now_ms())
@@ -155,7 +156,7 @@ def fill_history(conn, cfg, client, sat_row, spec, log, pages=None, days=None):
     baseline.fill_phases(conn, norad)
     older = [satnogs.parse_ts(f.get("timestamp")) for f in frames]
     older = min([t for t in older if t], default=None)
-    if len(frames) < pages * 25 or older is None or older >= oldest:   # nothing older in the window
+    if getattr(client, "exhausted", False) or older is None or older >= oldest:   # nothing older in the window
         dbm.smeta_set(conn, norad, "history_done_ms", target)
         log(f"[{norad}] History complete back to {time.strftime('%Y-%m-%d', time.gmtime((older or oldest) / 1000))}.")
         return True
@@ -228,6 +229,19 @@ def fetch_one(conn, cfg, client, sat_row, force, log):
     return 0
 
 
+def optimize(conn):
+    """Keep query plans good as the tables grow; near-free. It reads statistics and then may write
+    them, and in WAL mode a reader can't wait its way into being a writer if the web server wrote in
+    between, so take the write lock first. Skipped if the database is busy; it's only housekeeping."""
+    try:
+        conn.commit()
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("PRAGMA optimize")
+        conn.commit()
+    except sqlite3.OperationalError:
+        conn.rollback()
+
+
 def run(cfg, force=False, log=print, only=None):
     conn = dbm.open_db(cfg)
     lock = open(cfg.db_path.parent / "fetch.lock", "w")
@@ -243,16 +257,35 @@ def run(cfg, force=False, log=print, only=None):
         for sat_row in dbm.satellites(conn):
             if only and sat_row["norad"] != only:
                 continue
-            rc = fetch_one(conn, cfg, client, sat_row, force, log)
+            try:
+                rc = fetch_one(conn, cfg, client, sat_row, force, log)
+            except satnogs.Refused as e:   # a broken connection in a step that doesn't expect one
+                conn.rollback()
+                dbm.record_fetch(conn, False, e.status, 0, 0, str(e), sat_row["norad"])
+                notify.fetch_failed(conn, cfg)
+                log(f"[{sat_row['norad']}] {e}")
+                rc = 4
+            except Exception as e:   # a bug for one satellite mustn't stop the others; it's logged
+                conn.rollback()
+                dbm.record_fetch(conn, False, None, 0, 0, f"Internal error: {type(e).__name__}: {e}"[:300], sat_row["norad"])
+                log(f"[{sat_row['norad']}] Internal error: {type(e).__name__}: {e}")
+                import traceback
+                traceback.print_exc()
+                rc = 5
             worst = max(worst, rc)
             if rc == 3:   # the key is bad for every satellite; stop
                 break
-        catalog.refresh(conn, cfg, log)
-        spacewx.refresh(conn, cfg, log)
-        for sat_row in dbm.satellites(conn):   # catch up orbit phases (also after an upgrade)
-            baseline.fill_phases(conn, sat_row["norad"])
-        notify.storage_check(conn, cfg, log)
-        conn.execute("PRAGMA optimize")   # keeps query plans good as the tables grow; near-free
+        # Extras: each one is useful but optional, so a surprise in one never costs the fetch.
+        for name, job in (("catalog", lambda: catalog.refresh(conn, cfg, log)),
+                          ("space weather", lambda: spacewx.refresh(conn, cfg, log)),
+                          ("orbit phases", lambda: [baseline.fill_phases(conn, s["norad"]) for s in dbm.satellites(conn)]),
+                          ("storage check", lambda: notify.storage_check(conn, cfg, log))):
+            try:
+                job()
+            except Exception as e:
+                conn.rollback()
+                log(f"{name.capitalize()} skipped: {type(e).__name__}: {e}")
+        optimize(conn)
         try:
             summary.maybe_send(conn, cfg, log)
         except Exception as e:

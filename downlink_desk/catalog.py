@@ -42,7 +42,8 @@ def refresh(conn, cfg, log=print, force=False):
     try:
         for _ in range(30):
             data = c._get(url, params, timeout=60)
-            items.extend(data.get("results", []) if isinstance(data, dict) else data)
+            page = data.get("results", []) if isinstance(data, dict) else data
+            items.extend(page if isinstance(page, list) else [])
             url = data.get("next") if isinstance(data, dict) else None
             params = None
             if not url:
@@ -52,20 +53,37 @@ def refresh(conn, cfg, log=print, force=False):
         return
     out = []
     for s in items:
-        if s.get("decayed") or str(s.get("status", "")).lower() in ("dead", "re-entered", "future"):
+        if not isinstance(s, dict):
             continue
-        norad = s.get("norad_cat_id")
-        tels = s.get("telemetries") or []
-        dec = next((t.get("decoder") for t in tels if isinstance(t, dict) and t.get("decoder") in decs), None)
-        if not norad or not dec:
+        try:
+            row = _row(s, decs)
+        except (TypeError, ValueError):   # one odd record mustn't lose the catalog
             continue
-        out.append({"norad": int(norad), "name": str(s.get("name") or "")[:60], "decoder": dec,
-                    "names": str(s.get("names") or "")[:120], "countries": str(s.get("countries") or "")[:40],
-                    "launched": (s.get("launched") or "")[:10], "website": str(s.get("website") or "")[:200],
-                    "operator": "" if str(s.get("operator")) == "None" else str(s.get("operator") or "")[:80],
-                    "status": str(s.get("status") or "")})
-    _path(cfg).write_text(json.dumps(out), encoding="utf-8")
+        if row:
+            out.append(row)
+    if not out:
+        log(f"Catalog: nothing decodable in {len(items)} records; keeping the previous list.")
+        return
+    tmp = _path(cfg).with_suffix(".tmp")   # write then rename: a reader never sees half a file
+    tmp.write_text(json.dumps(out), encoding="utf-8")
+    tmp.replace(_path(cfg))
     log(f"Catalog: {len(out)} decodable satellites in orbit (from {len(items)} on SatNOGS).")
+
+
+def _row(s, decs):
+    """One catalog record, or None if it's gone or we can't decode it."""
+    if s.get("decayed") or str(s.get("status", "")).lower() in ("dead", "re-entered", "future"):
+        return None
+    norad = s.get("norad_cat_id")
+    tels = s.get("telemetries") or []
+    dec = next((t.get("decoder") for t in tels if isinstance(t, dict) and t.get("decoder") in decs), None)
+    if not norad or not dec:
+        return None
+    return {"norad": int(norad), "name": str(s.get("name") or "")[:60], "decoder": dec,
+            "names": str(s.get("names") or "")[:120], "countries": str(s.get("countries") or "")[:40],
+            "launched": str(s.get("launched") or "")[:10], "website": str(s.get("website") or "")[:200],
+            "operator": "" if str(s.get("operator")) == "None" else str(s.get("operator") or "")[:80],
+            "status": str(s.get("status") or "")}
 
 
 def entries(conn, cfg):
