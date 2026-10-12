@@ -60,3 +60,59 @@ def limits_in_force(conn, spec, norad, default_norad):
         if d.get("ch") in lim and isinstance(d.get("lim"), list) and len(d["lim"]) == 4:
             lim[d["ch"]] = None if all(v is None for v in d["lim"]) else d["lim"]
     return lim
+
+
+def silence_probability(report, cfg, prior=0.02, strength=4.0):
+    """How likely is it that the satellite has really gone quiet, rather than the stations missing it?
+
+    Each station has a track record in the last month: of its finished, reasonably high
+    observations, how many heard the satellite. A miss by a station that almost always hears it is
+    strong evidence of silence; a miss by an unreliable one is weak evidence. Bayes' rule:
+
+        odds(silent | misses) = odds(silent) × Π 1 / (1 − p_station)
+
+    where p_station is that station's hit rate, pulled towards the network-wide rate when it has
+    few observations (a Beta prior worth `strength` observations). The prior says a satellite that
+    was being heard is unlikely (2%) to die at any given moment."""
+    min_el = cfg["alerts"]["min_obs_elevation"]
+    done = sorted([o for o in report if o["status"] in ("heard", "nothing") and (o["max_alt"] or 0) >= min_el],
+                  key=lambda o: o["end"])
+    if not done:
+        return {"probability": None, "misses": 0}
+    hits = sum(1 for o in done if o["status"] == "heard")
+    pg = (hits + 1) / (len(done) + 2)
+    st = {}
+    for o in done:
+        h, n = st.get(o["station"], (0, 0))
+        st[o["station"]] = (h + (o["status"] == "heard"), n + 1)
+    rate = {k: (h + strength * pg) / (n + strength) for k, (h, n) in st.items()}
+    streak = []
+    for o in reversed(done):
+        if o["status"] == "heard":
+            break
+        streak.append(o)
+    lr = 1.0
+    for o in streak:
+        lr *= 1 / max(0.03, 1 - min(0.97, rate[o["station"]]))
+    odds = prior / (1 - prior) * lr
+    return {"probability": round(odds / (1 + odds), 3), "misses": len(streak),
+            "expected_hits": round(sum(rate[o["station"]] for o in streak), 2),
+            "network_hit_rate": round(pg, 3), "stations": len(st),
+            "last_heard": next((o["end"] for o in reversed(done) if o["status"] == "heard"), None)}
+
+
+def silence(conn, cfg, norad, now):
+    """Silent-satellite verdict: the Bayesian probability over the last month of observations, with
+    the plain 'N misses in a row' rule as a fallback when there's no track record yet."""
+    rep = observation_report(conn, cfg, now - 30 * 86_400_000, now, norad)
+    streak = silent_streak(rep, cfg)
+    p = silence_probability(rep, cfg)
+    thr = cfg["alerts"].get("silent_probability", 0.8)
+    if p["probability"] is not None and p.get("stations", 0) and len(rep) >= 5:
+        p["silent"] = p["probability"] >= thr and len(streak) >= 2
+        p["basis"] = "probability"
+    else:
+        p["silent"] = len(streak) >= cfg["alerts"]["silent_after"]
+        p["basis"] = "count"
+    p["streak"] = streak
+    return p

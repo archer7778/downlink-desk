@@ -12,10 +12,14 @@ Downlink Desk watches real CubeSats in orbit. It pulls their telemetry from the 
 **Knows what normal looks like**
 - **Learned thermal and power model.** A small satellite warms in sunlight and cools in Earth's shadow every 95 minutes. For each channel the Pi learns the typical value at each point of that cycle, corrects for the shadow growing and shrinking through the seasons, and compares the last two days with the three weeks before. A battery running 3 °C warmer than it used to at the same point in the orbit is still far inside its limits; this catches it anyway.
 - **Orbit profile charts:** each channel plotted against minutes since sunrise, with the learned curve, its normal spread, and the latest readings on top.
-- **Drift and oddity alerts** when a channel moves away from its own history, separate from the fixed limits.
+- **Drift and oddity alerts** when a channel moves away from its own history, separate from the fixed limits, with a 90% range on every shift and an estimate of when it began.
+- **Restart forensics:** the exact moment each subsystem restarted (frame time minus its uptime counter), where the satellite was, and the space weather at the time, plus a test of whether restarts cluster over the South Atlantic Anomaly more than chance allows. Restarts are marked on the globe.
+- **Silence you can trust:** instead of "three misses in a row", the probability the satellite has really gone quiet, weighing each SatNOGS station's own track record (a miss by a station that always hears it counts for far more than one by a station that often misses).
 
 **Checks the battery**
 - **Battery health tab:** charge in and out around a whole orbit, how deep each eclipse drains the battery, whether it gets back to full in sunlight, voltage left at the end of eclipse and its trend, time spent outside lithium-ion's safe temperatures, and an effective internal resistance that rises as cells age.
+- **Measured capacity (experimental):** charge drawn during each eclipse against the fall in state of charge read from the battery voltage gives how much the pack actually holds, as a cross-check on the datasheet figure.
+- **Internal resistance at 25 °C:** measured from frames seconds apart in the same pass (when the radio transmits, current jumps but charge and temperature can't change), corrected for temperature so a cold week doesn't look like ageing, with a 90% range and its trend.
 - **Life estimate:** charge cycles since launch (about 12,000 for GRBBeta so far) against a cycle-life model for lithium-ion at the measured depth and temperature, giving an estimated capacity left and years to end of life, with a range. Battery details the team hasn't published are written down as assumptions, with their source, in one editable file.
 
 **Shows where it is, right now**
@@ -66,7 +70,8 @@ NOAA space weather (every 3 h) ────────────────�
 - Scheduled observations come from the public SatNOGS Network API every 3 hours, following its paged list.
 - Sunlight and position come from the latest orbit data (SGP4 plus a cylindrical Earth-shadow model). The globe gets a position every 30 seconds from `/api/track` and interpolates on the sphere in between; it's drawn on a plain canvas with no map library, from a 73 KB outline file.
 - Alerts are worked out in the browser from the stored telemetry, so every viewer sees the same thing. Phone alerts are checked by the fetch job on the Pi.
-- `downlink_desk/baseline.py` is the learned model: robust medians in 5-minute bins of orbit phase, a seasonal correction for shadow length, and drift judged on effect size and significance together, so a single noisy pass can't trigger it.
+- `downlink_desk/baseline.py` is the learned model: a robust (Huber-weighted, ridge-damped) Fourier fit in orbit phase with a seasonal shadow-length term, fewer harmonics when data are sparse. Evidence is counted by pass, not frame (frames in one pass aren't independent); shifts get a 90% bootstrap range over passes and must be both large (in units of normal scatter) and clear of zero; a change-point estimator dates when a drift began; trends use the Theil–Sen slope.
+- `downlink_desk/forensics.py` times restarts from uptime counters and tests for SAA clustering with a binomial tail probability; `analysis.silence_probability` is the Bayesian silent-satellite check (per-station hit rates with a Beta prior, odds updated by each miss).
 - `downlink_desk/battery.py` places every frame in the orbit's day/night cycle and integrates charge and discharge current around it; internal resistance comes from how voltage moves with current once the orbit pattern is removed.
 - `.github/workflows/demo.yml` builds the public demo: GitHub Actions fetches from SatNOGS every 6 hours, keeps the database in its cache between runs, and `downlink_desk/export_static.py` publishes a read-only snapshot of the console to GitHub Pages.
 - `deploy/update.sh` (run by a systemd timer after boot and nightly) fast-forwards from GitHub, installs new packages, restarts the console, checks it answers, and rolls back if not.

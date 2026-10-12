@@ -1,2 +1,2 @@
 """Downlink Desk: a lightweight mission-operations console for small satellite teams."""
-__version__ = "0.9.0"
+__version__ = "0.10.0"

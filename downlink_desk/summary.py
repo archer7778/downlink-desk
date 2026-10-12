@@ -3,7 +3,7 @@ import datetime as _dt
 
 from . import baseline, notify, spacewx
 from . import db as dbm
-from .analysis import observation_report, silent_streak
+from .analysis import observation_report, silence
 
 DAY = 86_400_000
 
@@ -52,10 +52,21 @@ def satellite_section(conn, cfg, sat, now):
     done = [o for o in rep if o["status"] in ("heard", "nothing")]
     if done:
         lines.append(f"SatNOGS observations: {sum(o['status'] == 'heard' for o in done)} of {len(done)} delivered frames")
-    streak = silent_streak(observation_report(conn, cfg, now - 3 * DAY, now, n), cfg)
-    if len(streak) >= cfg["alerts"]["silent_after"]:
-        lines.append(f"⚠ {len(streak)} observations in a row heard nothing: it may have gone quiet")
+    sil = silence(conn, cfg, n, now)
+    if sil["silent"]:
+        lines.append(f"⚠ {sil['misses']} observations in a row heard nothing: "
+                     + (f"{sil['probability']:.0%} chance it has gone quiet" if sil["basis"] == "probability" else "it may have gone quiet"))
         flags.append("silent")
+    elif sil.get("misses", 0) >= 2 and sil.get("probability") is not None:
+        lines.append(f"{sil['misses']} recent observations heard nothing, but those stations often miss it "
+                     f"({sil['probability']:.0%} chance of real silence)")
+    try:
+        from . import forensics
+        fr = forensics.restarts(conn, spec, n, 30, now)
+        if fr["stats"]["total"]:
+            lines.append("Restarts: " + forensics.summary(fr))
+    except Exception:
+        pass
     # restarts
     restarts = []
     for ch in [x for x in spec.get("channels", []) if x.get("counter") == "reboot"]:

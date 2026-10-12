@@ -21,7 +21,7 @@ from urllib.parse import parse_qs, urlparse
 
 from . import __version__, baseline, battery, logchain, spacewx, summary
 from . import db as dbm
-from .analysis import observation_report, silent_streak
+from .analysis import observation_report, silence
 from .catalog import channels_for, entries, featured, find
 from .config import find_config
 from .fetch import spec_for
@@ -151,15 +151,31 @@ class App:
                                 "FROM frames WHERE norad=? AND decoded_ok=1", (now - 86_400_000, n)).fetchone()
                 rep = observation_report(c, self.cfg, now - 3 * 86_400_000, now, n)
                 last_ok = dbm.smeta_get(c, n, "last_ok_ms")
-            streak = silent_streak(rep, self.cfg)
+                obs_ref = dbm.smeta_get(c, n, "obs_refreshed_ms")
+            sil = self.cached(("silence", n), 300, lambda n=n: self._silence(n, now),
+                              self.data_sig(n) + (obs_ref, now // 600_000))
             nxt = next((o for o in sorted(rep, key=lambda o: o["start"]) if o["end"] > now), None)
             f = feat.get(n, {})
             out.append({**s, "last_frame_ms": cnt["last"], "frames_24h": cnt["day"] or 0, "last_ok_ms": last_ok,
-                        "silent": len(streak) >= self.cfg["alerts"]["silent_after"],
+                        "silent": sil["silent"], "silence_probability": sil["probability"],
                         "next_obs_ms": nxt["start"] if nxt else None,
                         "bio": f.get("bio", ""), "size": f.get("size", ""), "builder": f.get("builder", ""),
                         "country": f.get("country", ""), "launched": f.get("launched", ""), "website": f.get("website", "")})
         return out
+
+    def _silence(self, norad, now):
+        with self.ro() as c:
+            return silence(c, self.cfg, norad, now)
+
+    def restarts(self, sat):
+        from . import forensics
+        n = sat["norad"]
+        spec = self.spec(sat)
+
+        def build():
+            with self.ro() as c:
+                return forensics.restarts(c, spec, n, 30)
+        return self.cached(("restarts", n), 600, build, self.data_sig(n))
 
     def track(self, norad, cs):
         with self.lock:
@@ -248,9 +264,12 @@ class App:
         with self.ro() as c:
             rep = observation_report(c, self.cfg, now - days * 86_400_000, now, sat["norad"])
             refreshed = dbm.smeta_get(c, sat["norad"], "obs_refreshed_ms")
-        streak = silent_streak(rep, self.cfg)
+        with self.ro() as c:
+            sil = silence(c, self.cfg, sat["norad"], now)
         return {"now": now, "observations": rep, "refreshed_ms": refreshed,
-                "silent_streak": [o["id"] for o in streak], "silent_after": self.cfg["alerts"]["silent_after"]}
+                "silent_streak": [o["id"] for o in sil["streak"]] if sil["silent"] else [], "silent_after": 1,
+                "silence": {k: v for k, v in sil.items() if k != "streak"},
+                "missed_run": [o["id"] for o in sil["streak"]]}
 
     def _tle(self, sat):
         with self.ro() as c:
@@ -575,6 +594,8 @@ def make_handler(app):
                     return self._json(app.battery(sat))
                 if p == "/api/track":
                     return self._json(app.ground_track(sat))
+                if p == "/api/restarts":
+                    return self._json(app.restarts(sat))
                 if p == "/api/model":
                     return self._json(app.model(sat))
                 if p == "/api/profile":

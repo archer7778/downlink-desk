@@ -314,7 +314,13 @@ pre.sum{margin:0;padding:12px 14px;font:12.5px/1.6 var(--f-mono);white-space:pre
         <div class="panel">
           <div class="ph"><h2>Health model</h2><span class="sub" id="modelNote">Learns what normal looks like for every point in the orbit, then flags slow drifts that fixed limits miss</span></div>
           <div class="dt"><table style="min-width:640px"><thead><tr><th>Channel</th><th>Status</th><th style="text-align:right">Latest vs normal</th><th style="text-align:right" id="modelRecentTh">Last 2 days</th><th style="text-align:right">Trend / week</th><th style="text-align:right">Samples</th></tr></thead><tbody id="modelBody"></tbody></table></div>
-          <div class="pb"><p class="note">A small satellite warms in sunlight and cools in Earth’s shadow every orbit, so whether a reading is normal depends on where in that cycle it was taken. For each channel the Pi learns the typical value at each point of the cycle (minutes since the satellite last came out of shadow), corrects for longer or shorter shadows through the seasons, and compares the last two days with the three weeks before. Because it learns only from data more than two days old, a new install shows “needs older data” until the Pi has filled in some history, which it does by itself a little at every fetch. Select a row for its orbit profile.</p></div>
+          <div class="pb" id="modelHow"><p class="note">A small satellite warms in sunlight and cools in Earth’s shadow every orbit, so whether a reading is normal depends on where in that cycle it was taken. For each channel the Pi learns the typical value at each point of the cycle (minutes since the satellite last came out of shadow), corrects for longer or shorter shadows through the seasons, and compares the last two days with the three weeks before. The curve is a smooth fit around the orbit (a few harmonics, robust to odd frames). Evidence is counted by pass, not by frame, because frames from one pass aren’t independent. Every shift comes with a 90% range from resampling whole passes, and a drift is dated to when it most likely began. Because it learns only from data more than two days old, a new install shows “needs older data” until the Pi has filled in some history, which it does by itself a little at every fetch. Select a row for its orbit profile.</p></div>
+        </div>
+        <div class="panel">
+          <div class="ph"><h2>Restart forensics</h2><span class="sub">Last 30 days · when, where and in what conditions each subsystem restarted</span></div>
+          <div class="pb" style="padding-bottom:4px"><p class="note" id="rsSummary">Loading…</p></div>
+          <div class="dt"><table style="min-width:600px"><thead><tr><th>Restarted (UTC)</th><th>Subsystem</th><th>Where</th><th>Space weather</th></tr></thead><tbody id="rsBody"></tbody></table></div>
+          <div class="pb"><p class="note">Uptime counters give the exact moment: frame time minus uptime. The orbit then says where the satellite was. Radiation upsets cluster over the South Atlantic Anomaly; if restarts land there far more often than the time spent there would explain, that is the signature. Boot counters catch the rest, with the time known only to between two frames.</p></div>
         </div>
         <div class="panel">
           <div class="ph"><h2>Expected vs received</h2><span class="sub" id="obsNote">SatNOGS stations scheduled to listen, and what each one delivered</span></div>
@@ -337,7 +343,7 @@ pre.sum{margin:0;padding:12px 14px;font:12.5px/1.6 var(--f-mono);white-space:pre
           <div class="globe"><canvas id="globe" role="img" aria-label="Globe showing the satellite's position, ground track and heading"></canvas></div>
           <div class="globe-meta" id="globeMeta">Loading the orbit…</div>
           <ul class="downlinks" id="downlinks"></ul>
-          <div class="legend"><span><i style="background:var(--accent)"></i>Satellite, arrow shows its heading</span><span><i class="band" style="background:var(--accent);opacity:.9"></i>Next orbit (dashed)</span><span><i class="band" style="background:var(--accent);opacity:.35"></i>Last 45 min</span><span><i style="background:transparent;border:1.5px solid var(--accent)"></i>Area that can hear it</span><span><i class="band" style="background:var(--t4)"></i>Your station</span><span><i class="tri" style="color:var(--warn)"></i>Next SatNOGS station to listen (bold: the stretch it will hear)</span><span><i class="tri" style="color:var(--ok)"></i>Listening now / heard it today</span><span><i class="tri" style="color:var(--muted)"></i>Scheduled later</span><span><i class="band" style="background:#000;opacity:.35"></i>Night</span></div>
+          <div class="legend"><span><i style="background:var(--accent)"></i>Satellite, arrow shows its heading</span><span><i class="band" style="background:var(--accent);opacity:.9"></i>Next orbit (dashed)</span><span><i class="band" style="background:var(--accent);opacity:.35"></i>Last 45 min</span><span><i style="background:transparent;border:1.5px solid var(--accent)"></i>Area that can hear it</span><span><i class="band" style="background:var(--t4)"></i>Your station</span><span><i class="tri" style="color:var(--warn)"></i>Next SatNOGS station to listen (bold: the stretch it will hear)</span><span><i class="tri" style="color:var(--ok)"></i>Listening now / heard it today</span><span><i class="tri" style="color:var(--muted)"></i>Scheduled later</span><span><i class="band" style="background:#000;opacity:.35"></i>Night</span><span style="color:var(--crit);font-weight:700">×</span><span style="margin-left:-10px">Restart (last 30 days)</span></div>
         </div>
         <div class="panel">
           <div class="ph"><h2>Alerts</h2><div class="row"><span class="sub" id="alertNote"></span><button class="btn sm" id="ackAll" hidden>Acknowledge all</button></div></div>
@@ -571,7 +577,7 @@ function derive(now){
     const ids=new Set(OBS.silent_streak),st=OBS.observations.filter(o=>ids.has(o.id));
     const last=st[st.length-1],names=[...new Set(st.map(o=>o.station))].join(', ');
     alerts.push({id:akey('silent')+'@'+st[0].id,key:akey('silent'),sev:'crit',sev0:'crit',raised:last.end+(CONF.alerts.upload_grace_hours||3)*HOUR,cleared:null,
-      msg:`${st.length} scheduled observations in a row produced no frames (${names}). The satellite may have gone quiet, or those stations had trouble`,first:''});
+      msg:`${st.length} scheduled observations in a row produced no frames (${names}).`+(OBS.silence&&OBS.silence.basis==='probability'?` Given how reliably those stations usually hear it, there is a ${Math.round(OBS.silence.probability*100)}% chance it has really gone quiet`:' The satellite may have gone quiet, or those stations had trouble'),first:''});
   }
   const cut=CONF.commissioned_ms||0;
   const kept=alerts.filter(a=>a.raised>=cut||a.cleared==null);
@@ -781,10 +787,11 @@ function renderObs(now){
   const past=all.filter(o=>o.end<=now).sort((a,b)=>b.end-a.end).slice(0,8);
   const sig=JSON.stringify([future.map(o=>[o.id,o.status]),past.map(o=>[o.id,o.status,o.frames]),Math.floor(now/MIN)]);if(sig===lastObsSig)return;lastObsSig=sig;
   const day=all.filter(o=>o.end<=now&&o.end>now-2*DAY&&o.status!=='awaiting'),ok=day.filter(o=>o.status==='heard').length;
-  $('#obsNote').textContent=day.length?`Last 48 h: ${ok} of ${day.length} finished observations delivered frames (${Math.round(ok/day.length*100)}%)`:'SatNOGS stations scheduled to listen, and what each delivered';
-  const silent=new Set(OBS.silent_streak||[]);
+  const SL=OBS.silence;
+  $('#obsNote').textContent=(day.length?`Last 48 h: ${ok} of ${day.length} finished observations delivered frames (${Math.round(ok/day.length*100)}%)`:'SatNOGS stations scheduled to listen, and what each delivered')+(SL&&SL.misses?` · ${SL.misses} miss${SL.misses>1?'es':''} since it was last heard: ${SL.probability!=null?Math.round(SL.probability*100)+'% chance it has really gone quiet (weighing each station’s track record)':'too little history to judge'}`:'');
+  const silent=new Set(OBS.silent_streak||[]),missed=new Set(OBS.missed_run||[]);
   const row=o=>{const [cls,lab]=OBS_LABEL[o.status]||['',o.status];const when=o.status==='scheduled'?`in ${dur(o.start-now)}`:'';
-    const res=o.status==='heard'?`${o.frames} frame${o.frames>1?'s':''}, ${o.decoded} decoded`:o.status==='awaiting'?'stations upload after the pass':o.status==='nothing'?(silent.has(o.id)?'part of a silent run':''):when;
+    const res=o.status==='heard'?`${o.frames} frame${o.frames>1?'s':''}, ${o.decoded} decoded`:o.status==='awaiting'?'stations upload after the pass':o.status==='nothing'?(silent.has(o.id)?'part of a silent run':missed.has(o.id)?'missed since last heard':''):when;
     return `<tr class="${o.end>now?'upcoming':''}"><td class="mono">${fmtDT(o.start)}–${fmtHM(o.end)}</td><td>${esc(o.station||'—')}</td><td class="mono">${o.max_alt!=null?Math.round(o.max_alt)+'°':'—'}</td><td><span class="pill ${cls}">${lab}</span> <span class="note">${esc(res)}</span></td></tr>`};
   $('#obsBody').innerHTML=(future.map(row).join('')+past.map(row).join(''))||'<tr><td colspan="4" class="empty">No observations of this satellite are scheduled on SatNOGS right now. Frames still arrive whenever a station happens to record it.</td></tr>';
 }
@@ -925,9 +932,9 @@ function renderModel(){
   const rows=[...MODEL.channels].sort((a,b)=>(M_ORDER[a.status]-M_ORDER[b.status])||(Math.abs(b.z||0)-Math.abs(a.z||0)));
   $('#modelBody').innerHTML=rows.map(c=>{const [cls,lab]=M_ST[c.status]||['',c.status];const u=c.unit?' '+c.unit:'';const dp=Math.min(c.dp,2);
     const lt=c.latest?`${sgn(c.latest.value-c.latest.expected,dp)}${u} <span class="note">(${sgn(c.latest.sigmas,1)}σ)</span>`:'—';
-    const sh=c.shift!=null?`${sgn(c.shift,dp)}${u} <span class="note">(${sgn(c.z,1)}σ)</span>`:(c.status==='quiet'?'<span class="note">too few recent</span>':'—');
+    const sh=c.shift!=null?`<span title="${c.shift_range?`90% range ${sgn(c.shift_range[0],dp)} to ${sgn(c.shift_range[1],dp)}${u}, from ${c.n_recent_passes} passes`:''}">${sgn(c.shift,dp)}${u} <span class="note">(${sgn(c.z,1)}σ)</span></span>`:(c.status==='quiet'?'<span class="note">too few recent passes</span>':'—');
     const tr=c.trend_per_week!=null?sgn(c.trend_per_week,dp)+u:'—';
-    const lb=c.status==='learning'?(c.n_base===0?'Learning · needs older data':`Learning · ${c.need} more`):lab;
+    const lb=c.status==='learning'?(c.n_base===0?'Learning · needs older data':`Learning · ${c.need} more`):c.change?`${lab} · since ${fmtDT(c.change.began).slice(0,11)}`:lab;
     return `<tr class="mrow" data-mch="${esc(c.id)}"><td>${esc(c.name)}${c.n_unusual?`<span class="badge" title="Readings far from the model, beyond any drift">${c.n_unusual} odd</span>`:''}</td><td><span class="pill ${cls}">${esc(lb)}</span></td><td class="num">${lt}</td><td class="num">${sh}</td><td class="num">${tr}</td><td class="num">${c.n_base+c.n_recent}</td></tr>`}).join('')||'<tr><td colspan="6" class="empty">No channels suitable for a model.</td></tr>';
   const judged=MODEL.channels.filter(c=>!['learning','quiet'].includes(c.status));
   $('#modelNote').textContent=`Orbit ${MODEL.period_min.toFixed(1)} min`+(MODEL.shadow_min_now!=null?` · in shadow ${MODEL.shadow_min_now} min of it now`:'')+` · ${judged.length} of ${MODEL.channels.length} channels judged`;
@@ -956,7 +963,7 @@ function renderProfile(){
   const m=MODEL&&MODEL.channels.find(x=>x.id===c.id);const u=c.unit?' '+c.unit:'';
   $('#drModel').innerHTML=!m?'This channel is not modelled (counters and status flags are left out).':
     m.status==='learning'?`Still learning: ${m.n_base} samples with a known orbit position so far, ${m.need} more needed before it is judged.`:
-    `${(M_ST[m.status]||['',m.status])[1]}. `+(m.shift!=null?`Over the last ${MODEL.recent_days} days it ran ${sgn(m.shift,Math.min(c.dp,2))}${u} (${sgn(m.z,1)}σ) from its learned normal. `:'')+
+    `${(M_ST[m.status]||['',m.status])[1]}. `+(m.shift!=null?`Over the last ${MODEL.recent_days} days (${m.n_recent_passes} passes) it ran ${sgn(m.shift,Math.min(c.dp,2))}${u} (${sgn(m.z,1)}σ) from its learned normal`+(m.shift_range?`, 90% range ${sgn(m.shift_range[0],Math.min(c.dp,2))} to ${sgn(m.shift_range[1],Math.min(c.dp,2))}${u}`:'')+'. ':'')+(m.change?`The change most likely began around ${fmtDT(m.change.began)}. `:'')+(m.trend_per_week!=null?`Long-term trend ${sgn(m.trend_per_week,Math.min(c.dp,2)+1)}${u} a week. `:'')+
     `Typical scatter around the curve is ±${m.sigma.toFixed(Math.min(c.dp,2)+1)}${u}`+(m.seasonal_per_min!=null?`; each extra minute of shadow per orbit moves it ${sgn(m.seasonal_per_min,3)}${u}`:'')+'.'+
     (PROFILE.unphased?` ${PROFILE.unphased} older samples have no orbit position and are left out.`:'');
 }
@@ -988,7 +995,7 @@ function connectStream(){
     feedPush({kind:'frame',at:Date.now(),sat:d.sat,norad:d.norad,observer:d.observer,n:1,ok:d.ok?1:0,t0:d.t,t1:d.t,saa:d.saa,fresh:true});
     if(d.norad===SAT)liveNew++;});
   ES.addEventListener('data',e=>{const d=JSON.parse(e.data);if(!d.norads.includes(SAT))return;
-    clearTimeout(afterFramesT);afterFramesT=setTimeout(async()=>{await poll('tel');await Promise.all(['health','obs','model'].map(poll));refresh(true);
+    clearTimeout(afterFramesT);afterFramesT=setTimeout(async()=>{await poll('tel');await Promise.all(['health','obs','model','restarts'].map(poll));refresh(true);
       if(liveNew>0)toast(`${liveNew} new frame${liveNew>1?'s':''} of ${CONF.satellite.name} just arrived`);liveNew=0;if(tab==='frames')loadFrames(false)},1500)});
   ES.addEventListener('log',()=>poll('log'));
   ES.addEventListener('history',e=>{const d=JSON.parse(e.data);const top=FEED.find(f=>f.kind==='history'&&Date.now()-f.at<600000);
@@ -1036,10 +1043,10 @@ function batChart(B){
   const nets=prof.map(p=>p[1]).filter(v=>v!=null),vs=prof.map(p=>p[2]).filter(v=>v!=null);if(!nets.length)return '';
   let lo=Math.min(0,...nets),hi=Math.max(0,...nets);const pd=(hi-lo)*.1||50;lo-=pd;hi+=pd;
   const raw=(hi-lo)/4,mag=Math.pow(10,Math.floor(Math.log10(raw))),stp=[1,2,2.5,5,10].map(k=>k*mag).find(k=>k>=raw);lo=Math.floor(lo/stp)*stp;hi=Math.ceil(hi/stp)*stp;
-  let vlo=Math.min(...vs),vhi=Math.max(...vs);if(vhi-vlo<.05){vlo-=.05;vhi+=.05}const vp=(vhi-vlo)*.15;vlo-=vp;vhi+=vp;
+  const hasV=vs.length>0;let vlo=hasV?Math.min(...vs):0,vhi=hasV?Math.max(...vs):1;if(vhi-vlo<.05){vlo-=.05;vhi+=.05}const vp=(vhi-vlo)*.15;vlo-=vp;vhi+=vp;
   const W=1100,H=300,L0=56,R0=56,T0=18,B0=28,X=m=>L0+m/P*(W-L0-R0),Y=v=>T0+(hi-v)/(hi-lo)*(H-T0-B0),YV=v=>T0+(vhi-v)/(vhi-vlo)*(H-T0-B0);let g='';
   if(sh){g+=`<rect x="${X(P-sh).toFixed(1)}" y="${T0}" width="${(X(P)-X(P-sh)).toFixed(1)}" height="${H-T0-B0}" fill="var(--stale)" fill-opacity=".16"/><text x="${X(P-sh/2).toFixed(1)}" y="${T0-5}" text-anchor="middle" font-size="10.5" fill="var(--muted)" font-family="IBM Plex Sans Condensed,sans-serif" letter-spacing=".06em">EARTH’S SHADOW</text><text x="${X((P-sh)/2).toFixed(1)}" y="${T0-5}" text-anchor="middle" font-size="10.5" fill="var(--muted)" font-family="IBM Plex Sans Condensed,sans-serif" letter-spacing=".06em">SUNLIGHT</text>`}
-  for(let v=lo;v<=hi+1e-9;v+=stp){const y=Y(v);g+=`<line x1="${L0}" x2="${W-R0}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" stroke="var(--line)"/><text x="${L0-6}" y="${(y+3.5).toFixed(1)}" text-anchor="end" font-size="10.5" font-family="IBM Plex Mono,monospace" fill="var(--muted)">${v.toFixed(0)}</text><text x="${W-R0+6}" y="${(y+3.5).toFixed(1)}" font-size="10.5" font-family="IBM Plex Mono,monospace" fill="var(--t2)">${(vlo+(vhi-vlo)*(1-(y-T0)/(H-T0-B0))).toFixed(2)}</text>`}
+  for(let v=lo;v<=hi+1e-9;v+=stp){const y=Y(v);g+=`<line x1="${L0}" x2="${W-R0}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" stroke="var(--line)"/><text x="${L0-6}" y="${(y+3.5).toFixed(1)}" text-anchor="end" font-size="10.5" font-family="IBM Plex Mono,monospace" fill="var(--muted)">${v.toFixed(0)}</text>${hasV?`<text x="${W-R0+6}" y="${(y+3.5).toFixed(1)}" font-size="10.5" font-family="IBM Plex Mono,monospace" fill="var(--t2)">${(vlo+(vhi-vlo)*(1-(y-T0)/(H-T0-B0))).toFixed(2)}</text>`:''}`}
   g+=`<line x1="${L0}" x2="${W-R0}" y1="${Y(0).toFixed(1)}" y2="${Y(0).toFixed(1)}" stroke="var(--muted)"/>`;
   const bw=(X(5)-X(0))-2;
   for(const [m,n] of prof){if(n==null)continue;const y0=Y(0),y=Y(n),x0=X(m)-bw/2,w=Math.max(1,Math.min(bw,X(P)-1-x0));g+=`<rect x="${x0.toFixed(1)}" y="${Math.min(y,y0).toFixed(1)}" width="${w.toFixed(1)}" height="${Math.max(1,Math.abs(y-y0)).toFixed(1)}" fill="${n>=0?'var(--ok)':'var(--crit)'}" fill-opacity=".7"><title>${m.toFixed(0)} min after sunrise · net ${n>=0?'+':''}${n.toFixed(0)} mA</title></rect>`}
@@ -1067,6 +1074,17 @@ function renderBattery(){
   box.innerHTML=h;
 }
 async function loadBattery(){try{BAT=await api('/api/battery');$('#batTab').hidden=!BAT.available;if(tab==='battery')renderBattery()}catch(e){}}
+
+/* ---------- restart forensics ---------- */
+let RS=null,lastRsSig='';
+function renderRestarts(){
+  if(!RS)return;const sig=JSON.stringify(RS.stats)+RS.restarts.length;if(sig===lastRsSig)return;lastRsSig=sig;const S=RS.stats;
+  let t=S.total?`${S.total} restart${S.total>1?'s':''} in the last ${S.days} days.`:`No restarts in the last ${S.days} days.`;
+  if(S.located)t+=` ${S.in_saa} of ${S.located} with a known time happened over the South Atlantic Anomaly, where the satellite spends ${(S.saa_time_fraction*100).toFixed(0)}% of its time (${S.expected_in_saa} expected by chance).`+(S.in_saa>=2&&S.saa_p_value<.05?` That is unlikely to be chance (p = ${S.saa_p_value}): a radiation signature.`:'');
+  if(S.during_storm)t+=` ${S.during_storm} during a geomagnetic storm.`;
+  $('#rsSummary').textContent=t;
+  $('#rsBody').innerHTML=[...RS.restarts].reverse().map(f=>`<tr><td class="mono">${f.exact?fmtDT(f.t):`between ${fmtDT(f.window[0])} and ${fmtHM(f.window[1])}`}</td><td>${esc(f.subsystem)}${f.count>1?` ×${f.count}`:''}</td><td class="mono">${f.lat!=null?`${Math.abs(f.lat).toFixed(0)}°${f.lat>=0?'N':'S'} ${Math.abs(f.lon).toFixed(0)}°${f.lon>=0?'E':'W'} · ${f.sunlit?'sunlit':'shadow'}${f.saa?'<span class="badge">SAA</span>':''}`:'<span class="note">time not exact</span>'}</td><td class="mono">${f.kp!=null?`Kp ${f.kp.toFixed(1)}${f.kp>=5?' <span class="badge">storm</span>':''}`:'—'}</td></tr>`).join('')||'<tr><td colspan="4" class="empty">None. Restarts show up here with the time, place and space weather when they happened.</td></tr>';
+}
 
 /* ---------- globe: where the satellite is now ---------- */
 // Orthographic projection drawn on a canvas: graticule, Natural Earth coastlines and borders,
@@ -1139,6 +1157,8 @@ function drawGlobe(){
     if(g.kind==='now'){c.beginPath();c.arc(q[0],q[1],9+4*(Math.floor(now/500)%2),0,2*Math.PI);c.strokeStyle=colr;c.lineWidth=1.5;c.stroke()}
     if(g.kind==='next'||g.kind==='now'){c.font='600 11px IBM Plex Sans,system-ui,sans-serif';c.fillStyle=col('--ink');
       const w=c.measureText(g.name).width,x=q[0]+8+w>cx+R-4?q[0]-8-w:q[0]+8;c.fillText(g.name,x,q[1]+12)}}   // keep labels inside the globe
+  if(RS)for(const f of RS.restarts){if(f.lat==null)continue;const q=P(f.lat,f.lon);if(q[2]<=0)continue;
+    c.strokeStyle=col('--crit');c.lineWidth=1.8;c.beginPath();c.moveTo(q[0]-4,q[1]-4);c.lineTo(q[0]+4,q[1]+4);c.moveTo(q[0]+4,q[1]-4);c.lineTo(q[0]-4,q[1]+4);c.stroke()}
   const T=G.track&&G.track.points;
   if(T&&st.next){const o=st.next,seg=T.filter(p=>p[0]>=o.start&&p[0]<=o.end).map(p=>[p[1],p[2]]);
     if(seg.length>1){c.strokeStyle=col('--warn');c.lineWidth=4;c.globalAlpha=.85;line(seg);c.globalAlpha=1}}
@@ -1246,6 +1266,7 @@ async function poll(kind){
     if(kind==='obs'){OBS=await api('/api/observations?days=3');drawGlobe()}
     if(kind==='now')NOW=await api('/api/now');
     if(kind==='track'){G.track=await api('/api/track');drawGlobe()}
+    if(kind==='restarts'){RS=await api('/api/restarts');renderRestarts();drawGlobe()}
     if(kind==='model'){MODEL=await api('/api/model');lastModelSig='';renderModel()}
     if(kind==='sw'){SW=await api('/api/spaceweather?days=7');renderSW(Date.now())}
     if(kind==='sum'){SUM=await api('/api/summary');renderSummary()}
@@ -1266,7 +1287,8 @@ async function boot(){
   renderAbout();refresh(true);if(tab!=='console')showTab(tab);
   setupGlobe();poll('track');setInterval(()=>poll('track'),ST?3600000:300000);
   seedFeed();connectStream();loadBattery();setInterval(loadBattery,600000);
-  Promise.all(['model','sw','sum'].map(poll)).then(()=>refresh(true));
+  Promise.all(['model','sw','sum','restarts'].map(poll)).then(()=>refresh(true));
+  setInterval(()=>poll('restarts'),600000);
   setInterval(()=>poll('model'),300000);setInterval(()=>poll('sw'),900000);setInterval(()=>poll('sum'),600000);
   setInterval(()=>{tick++;refresh(false)},1000);
   // With the live stream connected, new data and log entries are pushed, so polling is only a slow safety net.

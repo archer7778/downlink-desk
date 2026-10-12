@@ -4,7 +4,7 @@ import urllib.request
 
 from . import __version__
 from . import db as dbm
-from .analysis import limits_in_force, observation_report, silent_streak
+from .analysis import limits_in_force, silence
 
 
 def _ascii(s):
@@ -80,12 +80,14 @@ def after_fetch(conn, cfg, spec, new_ids, log=print, sat_row=None):
                          "default", "arrows_counterclockwise")
                     sent += 1
                 prev[ch] = v
-    report = observation_report(conn, cfg, dbm.now_ms() - 3 * 86_400_000, dbm.now_ms(), norad)
-    streak = silent_streak(report, cfg)
-    if len(streak) >= cfg["alerts"]["silent_after"] and _once(conn, f"silent:{norad}:{streak[0]['id']}"):
+    sil = silence(conn, cfg, norad, dbm.now_ms())
+    streak = sil["streak"]
+    if sil["silent"] and streak and _once(conn, f"silent:{norad}:{streak[0]['id']}"):
         names = ", ".join(sorted({o["station"] for o in streak}))
+        why = (f" Given how reliably those stations usually hear it, the chance it has really gone quiet is "
+               f"{sil['probability']:.0%}." if sil["basis"] == "probability" else "")
         send(cfg, f"{sat}: may have gone silent", f"{len(streak)} scheduled SatNOGS observations in a row "
-             f"produced no frames (stations: {names}).", "high", "satellite")
+             f"produced no frames (stations: {names}).{why}", "high", "satellite")
         sent += 1
     if sent:
         log(f"Sent {sent} phone alert(s).")
