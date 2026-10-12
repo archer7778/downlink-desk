@@ -23,7 +23,7 @@ from urllib.parse import parse_qs, urlparse
 
 from . import __version__, baseline, battery, logchain, spacewx, summary
 from . import db as dbm
-from .analysis import observation_report, silence
+from .analysis import _good_limits, observation_report, silence
 from .catalog import channels_for, entries, featured, find
 from .config import find_config
 from .fetch import spec_for
@@ -676,6 +676,10 @@ def make_handler(app):
             try:
                 body = self._body()
                 if p == "/api/log":
+                    if body.get("kind") == "limits":
+                        d = body.get("data") if isinstance(body.get("data"), dict) else {}
+                        if not isinstance(d.get("ch"), str) or not _good_limits(d.get("lim")):
+                            raise ValueError("limits must be four numbers (or blanks) for a channel")
                     with app.lock:
                         e = logchain.append(app.conn, body.get("kind", ""), body.get("data", {}),
                                             body.get("msg", ""), body.get("cs", ""))
