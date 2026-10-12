@@ -10,3 +10,11 @@ WorkingDirectory=@ROOT@
 Environment=DOWNLINK_DESK_CONFIG=@ROOT@/config.toml
 ExecStart=@ROOT@/.venv/bin/python -m downlink_desk.fetch
 Nice=10
+
+# Sandboxing: no privilege gain, a private /tmp, and the operating system read-only.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes

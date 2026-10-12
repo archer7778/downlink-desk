@@ -11,8 +11,10 @@ import hashlib
 import hmac
 import io
 import json
+import math
 import mimetypes
 import queue
+import re
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -514,6 +516,7 @@ class App:
 def make_handler(app):
     class H(BaseHTTPRequestHandler):
         server_version = "DownlinkDesk/" + __version__
+        timeout = 60   # a client that stops sending mid-request is dropped, not kept on a thread forever
 
         def log_message(self, fmt, *args):
             pass
@@ -522,7 +525,10 @@ def make_handler(app):
             return "gzip" in (self.headers.get("Accept-Encoding") or "")
 
         def _json(self, obj, status=200):
-            body = json.dumps(obj, separators=(",", ":")).encode()
+            try:
+                body = json.dumps(obj, separators=(",", ":"), allow_nan=False).encode()
+            except ValueError:   # a NaN or infinity somewhere: browsers can't parse those, so send null
+                body = json.dumps(_finite(obj), separators=(",", ":")).encode()
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.send_header("Cache-Control", "no-store")
@@ -539,7 +545,8 @@ def make_handler(app):
             self.send_response(200)
             self.send_header("Content-Type", ctype)
             if filename:
-                self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+                safe = re.sub(r"[^A-Za-z0-9._-]", "_", filename)[:80]   # names come from SatNOGS; keep headers clean
+                self.send_header("Content-Disposition", f'attachment; filename="{safe}"')
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -561,9 +568,12 @@ def make_handler(app):
 
         def _body(self):
             n = int(self.headers.get("Content-Length") or 0)
-            if n > 64_000:
+            if n < 0 or n > 64_000:
                 raise ValueError("request too large")
-            return json.loads(self.rfile.read(n) or b"{}")
+            body = json.loads(self.rfile.read(n) or b"{}")
+            if not isinstance(body, dict):
+                raise ValueError("expected a JSON object")
+            return body
 
         def do_GET(self):
             u = urlparse(self.path)
@@ -586,9 +596,10 @@ def make_handler(app):
                 if p == "/api/telemetry":
                     if "after_id" in q:
                         return self._json(app.telemetry(sat, after_id=int(q["after_id"])))
-                    return self._json(app.telemetry(sat, since=int(q.get("since", dbm.now_ms() - 7 * 86_400_000))))
+                    since = max(int(q.get("since", dbm.now_ms() - 7 * 86_400_000)), dbm.now_ms() - 31 * 86_400_000)
+                    return self._json(app.telemetry(sat, since=since))   # at most a month at once (memory)
                 if p == "/api/frames":
-                    return self._json(app.frames(sat, min(int(q.get("limit", 100)), 500), int(q.get("before", 2**53))))
+                    return self._json(app.frames(sat, max(1, min(int(q.get("limit", 100)), 500)), int(q.get("before", 2**53))))
                 if p == "/api/health":
                     return self._json(app.health(sat))
                 if p == "/api/passes":
@@ -623,7 +634,14 @@ def make_handler(app):
                     with app.ro() as c:
                         return self._json(dbm.meta_get(c, "notes", {"text": "", "cs": "", "t": 0}))
                 if p == "/api/export/telemetry.csv":
-                    return self._text(export_csv(app, sat), "text/csv", f"{sat['name']}-telemetry.csv")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/csv; charset=utf-8")
+                    safe = re.sub(r"[^A-Za-z0-9._-]", "_", f"{sat['name']}-telemetry.csv")[:80]
+                    self.send_header("Content-Disposition", f'attachment; filename="{safe}"')
+                    self.end_headers()   # no length: streamed, and the connection closes at the end (HTTP/1.0)
+                    for chunk in export_csv_rows(app, sat):
+                        self.wfile.write(chunk.encode())
+                    return
                 if p == "/api/export/log.json":
                     with app.ro() as c:
                         data = {"satellite": app.cfg["satellite"], "exported_ms": dbm.now_ms(),
@@ -736,20 +754,48 @@ def make_handler(app):
     return H
 
 
-def export_csv(app, sat):
+def _finite(o):
+    if isinstance(o, float):
+        return o if math.isfinite(o) else None
+    if isinstance(o, dict):
+        return {k: _finite(v) for k, v in o.items()}
+    if isinstance(o, (list, tuple)):
+        return [_finite(v) for v in o]
+    return o
+
+
+def _cell(v):
+    """Spreadsheet-safe text: a cell starting with = + - @ would run as a formula in Excel, and
+    observer names come from volunteers."""
+    v = "" if v is None else str(v)
+    return "'" + v if v[:1] in ("=", "+", "-", "@", "\t", "\r") else v
+
+
+def export_csv_rows(app, sat):
+    """Yields CSV text a few hundred rows at a time, so a year of data never sits in memory."""
     ids = [c["id"] for c in app.spec(sat)["channels"]]
-    with app.ro() as c:
-        rows = c.execute("SELECT f.ts_ms, f.observer, f.frame_type, p.channel, p.value FROM frames f"
-                                " JOIN points p ON p.frame_id=f.id WHERE f.norad=? ORDER BY f.ts_ms", (sat["norad"],)).fetchall()
-    by = {}
-    for t, obs, ft, ch, v in rows:
-        by.setdefault((t, obs, ft), {})[ch] = v
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(["utc", "observer", "frame_type"] + ids)
-    for (t, obs, ft), vals in by.items():
-        w.writerow([time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t / 1000)), obs, ft] + [vals.get(i, "") for i in ids])
-    return buf.getvalue()
+    with app.ro() as c:
+        cur = c.execute("SELECT f.id, f.ts_ms, f.observer, f.frame_type, p.channel, p.value FROM frames f"
+                        " JOIN points p ON p.frame_id=f.id WHERE f.norad=? ORDER BY f.ts_ms, f.id", (sat["norad"],))
+        key, vals, n = None, {}, 0
+        for fid, t, obs, ft, ch, v in cur:
+            if key and key[0] != fid:
+                w.writerow([time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(key[1] / 1000)), _cell(key[2]), _cell(key[3])]
+                           + [vals.get(i, "") for i in ids])
+                vals, n = {}, n + 1
+                if n % 500 == 0:
+                    yield buf.getvalue()
+                    buf.seek(0)
+                    buf.truncate()
+            key = (fid, t, obs, ft)
+            vals[ch] = v
+        if key:
+            w.writerow([time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(key[1] / 1000)), _cell(key[2]), _cell(key[3])]
+                       + [vals.get(i, "") for i in ids])
+    yield buf.getvalue()
 
 
 def main(argv=None):

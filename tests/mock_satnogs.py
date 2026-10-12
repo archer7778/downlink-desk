@@ -94,25 +94,29 @@ def make_observations(frames, now=None, seed=11):
     scheduled ones that produced nothing, and some in the future."""
     rnd = random.Random(seed)
     now = now or time.time()
-    ts = sorted(datetime.fromisoformat(f["timestamp"].replace("Z", "+00:00")).timestamp() for f in frames)
+    ts = sorted((datetime.fromisoformat(f["timestamp"].replace("Z", "+00:00")).timestamp(), f["observer"]) for f in frames)
     bursts, cur = [], [ts[0]]
     for t in ts[1:]:
-        if t - cur[-1] > 1800:
+        if t[0] - cur[-1][0] > 1800:
             bursts.append(cur)
             cur = [t]
         else:
             cur.append(t)
     bursts.append(cur)
-    windows = [(b[0] - 90, b[-1] + 90, rnd.uniform(20, 70)) for b in bursts]
+    # each burst was heard by a station whose schedule name is the observer without its grid square
+    windows = [(b[0][0] - 90, b[-1][0] + 90, rnd.uniform(20, 70), b[0][1].rsplit("-", 1)[0]) for b in bursts]
     for k in range(4):   # scheduled but nothing came down
         t = now - rnd.uniform(6, 60) * 3600
-        windows.append((t, t + 540, rnd.uniform(18, 50)))
+        windows.append((t, t + 540, rnd.uniform(18, 50), None))
     for k in range(6):   # still to come
         t = now + (k + 1) * rnd.uniform(1.2, 2.5) * 3600
-        windows.append((t, t + 600, rnd.uniform(10, 80)))
+        windows.append((t, t + 600, rnd.uniform(10, 80), None))
     out = []
-    for i, (a, b, el) in enumerate(windows):
+    for i, (a, b, el, who) in enumerate(windows):
         name, sid, lat, lng = STATIONS[i % len(STATIONS)]
+        if who:
+            match = [st for st in STATIONS if st[0] == who]
+            name, sid, lat, lng = match[0] if match else (who, 9000 + i, 40.0, 0.0)
         iso = lambda x: datetime.fromtimestamp(x, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         out.append({"id": 15170000 + i, "start": iso(a), "end": iso(b), "ground_station": sid, "station_name": name,
                     "station_lat": lat, "station_lng": lng, "max_altitude": round(el, 1), "norad_cat_id": 60237,

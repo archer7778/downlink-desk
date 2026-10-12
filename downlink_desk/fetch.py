@@ -107,6 +107,8 @@ def store(conn, sat_row, spec, frames):
         hexf = (f.get("frame") or "").strip()
         if ts is None or not hexf or ts > horizon:   # volunteers occasionally upload future-dated frames
             continue
+        if len(hexf) > 4096:   # anyone can upload frames; a CubeSat frame is a few hundred bytes at most
+            continue
         try:
             bytes.fromhex(hexf)
         except ValueError:

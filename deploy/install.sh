@@ -26,6 +26,11 @@ if [ ! -f config.toml ]; then
   cp config.example.toml config.toml
   read -r -p "  Your latitude in decimal degrees (e.g. 51.48, or Enter to skip): " LAT || true
   read -r -p "  Your longitude in decimal degrees (e.g. -0.01, or Enter to skip): " LON || true
+  num='^-?[0-9]+([.][0-9]+)?$'
+  if [ -n "${LAT:-}${LON:-}" ] && ! [[ "${LAT:-}" =~ $num && "${LON:-}" =~ $num ]]; then
+    echo "  Those don't look like decimal degrees; skipped. Edit lat and lon in config.toml later."
+    LAT=""; LON=""
+  fi
   if [ -n "${LAT:-}" ] && [ -n "${LON:-}" ]; then
     sed -i "s/^lat = .*/lat = ${LAT}/; s/^lon = .*/lon = ${LON}/" config.toml
   fi
@@ -33,6 +38,7 @@ if [ ! -f config.toml ]; then
 else
   echo "  Keeping your existing config.toml"
 fi
+chmod 600 config.toml   # it can hold the operator passcode and your private alert topic
 if [ ! -s secrets/satnogs_token ]; then
   echo "  Your SatNOGS DB API key: log in at https://db.satnogs.org, click your avatar,"
   echo "  then Settings / API Token. (Press Enter to skip and add it later.)"
