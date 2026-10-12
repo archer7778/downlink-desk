@@ -42,12 +42,18 @@ def fill_phases(conn, norad, limit=20_000):
     tle = dbm.smeta_get(conn, norad, "tle")
     if not tle:
         return 0
+    epoch = tle.get("epoch_ms") or 0
+    if dbm.smeta_get(conn, norad, "phase_epoch") != epoch:
+        # New orbit data: frames that were too far from the old data's date get another chance.
+        conn.execute("UPDATE frames SET phase_min=NULL, shadow_min=NULL WHERE norad=? AND phase_min=-2 "
+                     "AND ts_ms BETWEEN ? AND ?", (norad, epoch - 45 * DAY, epoch + 45 * DAY))
+        conn.commit()
+        dbm.smeta_set(conn, norad, "phase_epoch", epoch)
     rows = conn.execute("SELECT id, ts_ms FROM frames WHERE norad=? AND phase_min IS NULL ORDER BY ts_ms LIMIT ?",
                         (norad, limit)).fetchall()
     if not rows:
         return 0
     from .orbit import sun_phases
-    epoch = tle.get("epoch_ms") or 0
     near = [r for r in rows if abs(r["ts_ms"] - epoch) < 45 * DAY]
     ph = sun_phases(tle["tle1"], tle["tle2"], [r["ts_ms"] for r in near]) if near else {}
     upd = []
@@ -58,6 +64,19 @@ def fill_phases(conn, norad, limit=20_000):
         else:
             upd.append((-2, None, r["id"]))
     conn.executemany("UPDATE frames SET phase_min=?, shadow_min=? WHERE id=?", upd)
+    # frames stored while there was no orbit data also lack position and sunlight: fill those in too
+    gaps = conn.execute("SELECT id, ts_ms FROM frames WHERE norad=? AND sunlit IS NULL AND ts_ms BETWEEN ? AND ? LIMIT ?",
+                        (norad, epoch - 45 * DAY, epoch + 45 * DAY, limit)).fetchall()
+    if gaps:
+        from sgp4.api import Satrec
+        from .orbit import state
+        sat = Satrec.twoline2rv(tle["tle1"], tle["tle2"])
+        fix = []
+        for r in gaps:
+            st = state(sat, r["ts_ms"])
+            if st:
+                fix.append((1 if st["sunlit"] else 0, st["lat"], st["lon"], r["id"]))
+        conn.executemany("UPDATE frames SET sunlit=?, sub_lat=?, sub_lon=? WHERE id=?", fix)
     conn.commit()
     return len(upd)
 

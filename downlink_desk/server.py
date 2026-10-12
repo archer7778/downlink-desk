@@ -583,7 +583,7 @@ def make_handler(app):
                 if p == "/api/satellites":
                     return self._json(app.fleet())
                 if p == "/api/spaceweather":
-                    return self._json(app.spaceweather(min(float(q.get("days", 7)), 60)))
+                    return self._json(app.spaceweather(_num(q, "days", 7, 0.1, 60, False)))
                 if p == "/api/summary":
                     return self._json(app.summary())
                 if p == "/api/catalog":
@@ -595,21 +595,21 @@ def make_handler(app):
                     return self._json(app.config(sat))
                 if p == "/api/telemetry":
                     if "after_id" in q:
-                        return self._json(app.telemetry(sat, after_id=int(q["after_id"])))
-                    since = max(int(q.get("since", dbm.now_ms() - 7 * 86_400_000)), dbm.now_ms() - 31 * 86_400_000)
+                        return self._json(app.telemetry(sat, after_id=_num(q, "after_id", 0, 0, I64)))
+                    since = _num(q, "since", dbm.now_ms() - 7 * 86_400_000, dbm.now_ms() - 31 * 86_400_000, I64)
                     return self._json(app.telemetry(sat, since=since))   # at most a month at once (memory)
                 if p == "/api/frames":
-                    return self._json(app.frames(sat, max(1, min(int(q.get("limit", 100)), 500)), int(q.get("before", 2**53))))
+                    return self._json(app.frames(sat, _num(q, "limit", 100, 1, 500), _num(q, "before", I64, 0, I64)))
                 if p == "/api/health":
                     return self._json(app.health(sat))
                 if p == "/api/passes":
-                    return self._json(app.passes(sat, min(float(q.get("hours", 36)), 72)))
+                    return self._json(app.passes(sat, _num(q, "hours", 36, 1, 72, False)))
                 if p == "/api/observations":
-                    return self._json(app.observations(sat, min(float(q.get("days", 3)), 14)))
+                    return self._json(app.observations(sat, _num(q, "days", 3, 0.1, 14, False)))
                 if p == "/api/eclipses":
                     now = dbm.now_ms()
-                    since = max(int(q.get("since", now - 7 * 86_400_000)), now - 14 * 86_400_000)
-                    return self._json(app.eclipses(sat, since, min(int(q.get("until", now)), now + 86_400_000)))
+                    since = _num(q, "since", now - 7 * 86_400_000, now - 14 * 86_400_000, now + 86_400_000)
+                    return self._json(app.eclipses(sat, since, _num(q, "until", now, since, now + 86_400_000)))
                 if p == "/api/now":
                     return self._json(app.now_state(sat))
                 if p == "/api/battery":
@@ -626,7 +626,7 @@ def make_handler(app):
                     return self._stream()
                 if p == "/api/log":
                     with app.ro() as c:
-                        return self._json(logchain.entries(c, int(q.get("after", 0))))
+                        return self._json(logchain.entries(c, _num(q, "after", 0, 0, I64)))
                 if p == "/api/log/verify":
                     with app.ro() as c:
                         return self._json(logchain.verify(c))
@@ -650,6 +650,12 @@ def make_handler(app):
                 return self._static(p)
             except (ValueError, KeyError) as e:
                 return self._json({"error": str(e)}, 400)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            except Exception:   # never drop the connection without an answer; the detail goes to the log
+                import traceback
+                traceback.print_exc()
+                return self._json({"error": "internal error (details in the Pi's log)"}, 500)
 
         def do_POST(self):
             u = urlparse(self.path)
@@ -681,13 +687,17 @@ def make_handler(app):
                     ok, msg = app.fetch_now(app.sat(q) if q.get("sat") else None)
                     return self._json({"ok": ok, "message": msg}, 202 if ok else 429)
                 if p == "/api/satellites/track":
-                    e = app.track(int(body.get("norad", 0)), str(body.get("cs", ""))[:16])
+                    e = app.track(_num(body, "norad", 0, 0, 10**7), str(body.get("cs", ""))[:16])
                     return self._json(e, 201)
                 if p == "/api/satellites/untrack":
-                    return self._json(app.untrack(int(body.get("norad", 0)), str(body.get("cs", ""))[:16]))
+                    return self._json(app.untrack(_num(body, "norad", 0, 0, 10**7), str(body.get("cs", ""))[:16]))
                 return self._json({"error": "not found"}, 404)
             except ValueError as e:
                 return self._json({"error": str(e)}, 400)
+            except Exception:
+                import traceback
+                traceback.print_exc()
+                return self._json({"error": "internal error (details in the Pi's log)"}, 500)
 
         def _event(self, name, data):
             self.wfile.write(f"event: {name}\ndata: {json.dumps(data, separators=(',', ':'))}\n\n".encode())
@@ -752,6 +762,23 @@ def make_handler(app):
             self.end_headers()
             self.wfile.write(body)
     return H
+
+
+I64 = 2**62
+
+
+def _num(src, name, default, lo, hi, integer=True):
+    """A number from a request, clamped to [lo, hi]. Rejects NaN, infinity and absurd sizes
+    (SQLite integers are 64-bit) with a clean 400 instead of a crash."""
+    raw = src.get(name, default)
+    try:
+        v = float(raw)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be a number")
+    if not math.isfinite(v):
+        raise ValueError(f"{name} must be a finite number")
+    v = min(max(v, lo), hi)
+    return int(v) if integer else v
 
 
 def _finite(o):
