@@ -53,14 +53,14 @@ def restarts(conn, spec, norad, days=30, now=None):
         for i, ((t0, v0), (t1, v1)) in enumerate(zip(rows, rows[1:])):
             up1 = v1 * k
             # uptime went down (beyond rounding): it restarted between the two frames
-            if v1 * k < v0 * k + (t1 - t0) / 1000 - 300 and v1 * k < v0 * k:
+            if 0 <= v1 * k < v0 * k + (t1 - t0) / 1000 - 300 and v1 * k < v0 * k:
                 at = int(t1 - up1 * 1000)
                 # one garbled frame looks like a restart, but the frame after it goes back to the old
                 # boot time; tolerance covers counters kept in whole hours
                 if i + 2 < len(rows) and abs(boot[i + 2] - boot[i]) <= max(120, k) * 1000 + 60_000:
                     continue
                 sub = _subsystem(c.get("name", c["id"]))
-                if at >= t0 - 60_000 and at >= since and not any(
+                if t0 - 60_000 <= at <= t1 and at >= since and not any(
                         f["subsystem"] == sub and abs(f["t"] - at) <= max(600, k) * 1000 for f in found):
                     found.append({"t": at, "exact": True, "subsystem": sub, "channel": c["id"], "seen": t1, "after": t0})
     # boot counters: catch restarts the uptime counters missed (time known only to a window), and

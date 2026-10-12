@@ -137,10 +137,14 @@ def sun_direction(jd):
 
 
 def state(sat, t_ms):
-    """Where the satellite is and whether it's in sunlight. Cylindrical Earth-shadow model."""
-    jd, fr = _jd(t_ms)
+    """Where the satellite is and whether it's in sunlight. Cylindrical Earth-shadow model.
+    None if it can't be worked out (a nonsense time, or the orbit model gives up)."""
+    try:
+        jd, fr = _jd(t_ms)
+    except (ValueError, OverflowError, OSError, TypeError):
+        return None
     err, r, _ = sat.sgp4(jd, fr)
-    if err:
+    if err or not all(math.isfinite(x) for x in r):
         return None
     s = sun_direction(jd + fr)
     dot = r[0] * s[0] + r[1] * s[1] + r[2] * s[2]

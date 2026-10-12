@@ -157,9 +157,12 @@ def _load(conn, norad, b, since, now):
     scale = _volt_scale(b, [f[vch] for f in frames.values() if vch in f])
     out = []
     for f in frames.values():
+        temp = f.get(tch)
+        if temp is not None and not -100 <= temp <= 150:   # a misdecoded reading, not a battery temperature
+            temp = None
         out.append({"t": f["t"], "phase": f["phase"], "fullsun": f["fullsun"], "shadow": f["shadow"], "sunlit": f["sunlit"],
                     "v": f[vch] * scale if vch in f and scale else None,
-                    "ic": f.get(cch), "id": f.get(dch), "temp": f.get(tch)})
+                    "ic": f.get(cch), "id": f.get(dch), "temp": temp})
     return sorted(out, key=lambda x: x["t"]), scale
 
 
