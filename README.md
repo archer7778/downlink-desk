@@ -9,7 +9,7 @@ It's plain Python and SQLite, so it runs on any Linux machine: a desktop, a serv
 **See it running on real data, no install:** <https://archer7778.github.io/downlink-desk/> (rebuilt every 6 hours from real GRBBeta telemetry). To practise with simulated faults, try the [training simulator](https://archer7778.github.io/downlink-desk/training).
 
 ![Downlink Desk console showing live GRBBeta telemetry from SatNOGS](docs/screenshot.png)
-*Live data from a station in Da Nang: GRBBeta, a 2U CubeSat from Slovakia, over the South Atlantic Anomaly, 25 minutes before the Piszkéstető station in Hungary hears it (the bold arc).*
+*Live data: GRBBeta, a 2U CubeSat from Slovakia, over the South Atlantic Anomaly, 25 minutes before the Piszkéstető station in Hungary hears it (the bold arc).*
 
 ## What it does
 

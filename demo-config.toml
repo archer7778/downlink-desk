@@ -2,9 +2,9 @@
 # Everything not set here uses the defaults: GRBBeta, polite SatNOGS polling, NOAA space weather.
 
 [station]
-name = "Da Nang"          # city centre, used for "next pass over you" on the demo
-lat = 16.05
-lon = 108.21
+name = "Greenwich"        # Royal Observatory, a neutral spot for "next pass over you" on the demo
+lat = 51.478
+lon = -0.0015
 
 [storage]
 db = "demo/data/downlink-desk.db"
