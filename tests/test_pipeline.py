@@ -89,6 +89,19 @@ def test_pipeline():
             st[o["status"]] = st.get(o["status"], 0) + 1
         print("observations:", st)
         assert st.get("heard") and st.get("scheduled") and st.get("nothing")
+        # frames outside stale orbit data's range get positions once fresh orbit data arrives
+        from downlink_desk import baseline
+        tle0 = dbm.smeta_get(conn, 60237, "tle")
+        dbm.smeta_set(conn, 60237, "tle", {**tle0, "epoch_ms": tle0["epoch_ms"] - 100 * 86_400_000})
+        conn.execute("UPDATE frames SET phase_min=NULL WHERE norad=60237"); conn.commit()
+        baseline.fill_phases(conn, 60237)
+        assert conn.execute("SELECT COUNT(*) FROM frames WHERE norad=60237 AND phase_min=-2").fetchone()[0] > 0
+        dbm.smeta_set(conn, 60237, "tle", tle0)
+        baseline.fill_phases(conn, 60237)
+        assert conn.execute("SELECT COUNT(*) FROM frames WHERE norad=60237 AND phase_min=-2").fetchone()[0] == 0
+        conn.execute("UPDATE frames SET sunlit=NULL, sub_lat=NULL, phase_min=NULL WHERE norad=60237"); conn.commit()
+        baseline.fill_phases(conn, 60237)
+        assert conn.execute("SELECT COUNT(*) FROM frames WHERE norad=60237 AND sunlit IS NULL").fetchone()[0] == 0
         # orbit context stored for frames
         sl = conn.execute("SELECT COUNT(*) FROM frames WHERE sunlit IS NOT NULL").fetchone()[0]
         assert sl == n, (sl, n)
@@ -162,24 +175,43 @@ def test_pipeline():
         shutil.rmtree(tmp)
 
 
-def test_migrates_v02_database():
-    """A database from the single-satellite version opens cleanly and keeps its data."""
-    src = Path("/tmp/claude-0/v02.db")
-    if not src.exists():
-        print("(no v0.2 database to migrate; skipped)")
-        return
+def test_migrates_v01_database():
+    """A database created by the very first release (one satellite, no orbit columns, no
+    observations or satellites tables) opens cleanly, keeps its data and works with today's code."""
+    import sqlite3
     tmp = Path(tempfile.mkdtemp())
     try:
         cfg = make_cfg(tmp, 8766)
         cfg.db_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy(src, cfg.db_path)
+        old = sqlite3.connect(cfg.db_path)
+        old.executescript((ROOT / "tests" / "schema_v01.sql").read_text())
+        now = dbm.now_ms()
+        for i in range(30):
+            t = now - i * 3600_000
+            old.execute("INSERT INTO frames(id,ts_ms,observer,frame_hex,frame_type,decoded_ok,fields_json,fetched_ms) "
+                        "VALUES(?,?,?,?,?,1,'{}',?)", (i + 1, t, "IV3DXW-JN65qq", "ab%02x" % i, "UHF beacon", t))
+            old.execute("INSERT INTO points(ts_ms,channel,value,frame_id) VALUES(?,?,?,?)", (t, "bat_t", 15.0 + i % 3, i + 1))
+        old.execute("INSERT INTO meta(key,value) VALUES('tle',?)", (json.dumps({"tle1": mock_satnogs.TLE[0],
+                    "tle2": mock_satnogs.TLE[1], "epoch_ms": now}),))
+        old.execute("INSERT INTO meta(key,value) VALUES('last_ok_ms',?)", (str(now),))
+        old.commit()
+        old.close()
         conn = dbm.open_db(cfg)
-        n = conn.execute("SELECT COUNT(*) FROM frames").fetchone()[0]
-        nn = conn.execute("SELECT COUNT(*) FROM frames WHERE norad=60237").fetchone()[0]
-        assert n and n == nn, (n, nn)
+        assert conn.execute("SELECT COUNT(*) FROM frames WHERE norad=60237").fetchone()[0] == 30
+        assert conn.execute("SELECT COUNT(*) FROM points WHERE norad=60237").fetchone()[0] == 30
         assert dbm.satellites(conn)[0]["norad"] == 60237
         assert dbm.smeta_get(conn, 60237, "tle") and dbm.meta_get(conn, "tle") is None
-        print("migrated v0.2 database:", n, "frames")
+        from downlink_desk import baseline
+        from downlink_desk.server import App
+        baseline.fill_phases(conn, 60237)
+        assert conn.execute("SELECT COUNT(*) FROM frames WHERE phase_min IS NULL OR sunlit IS NULL").fetchone()[0] == 0
+        app = App(cfg)
+        sat = app.sat({})
+        for fn in (app.health, app.model, app.battery, app.restarts, app.ground_track):
+            fn(sat)
+        app.observations(sat, 3)
+        app.summary()
+        print("migrated a v0.1 database: 30 frames, every view works")
     finally:
         shutil.rmtree(tmp)
 
@@ -558,7 +590,7 @@ def test_battery_health():
 
 
 if __name__ == "__main__":
-    test_migrates_v02_database()
+    test_migrates_v01_database()
     test_pipeline()
     test_model_spaceweather_summary_stream()
     test_battery_health()

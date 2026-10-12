@@ -104,7 +104,8 @@ def store(conn, sat_row, spec, frames):
     new, new_ids = 0, []
     for f in frames:
         ts = satnogs.parse_ts(f.get("timestamp"))
-        hexf = (f.get("frame") or "").strip()
+        hexf = f.get("frame")
+        hexf = hexf.strip() if isinstance(hexf, str) else ""   # anyone can upload; expect anything
         if ts is None or not hexf or ts > horizon:   # volunteers occasionally upload future-dated frames
             continue
         if len(hexf) > 4096:   # anyone can upload frames; a CubeSat frame is a few hundred bytes at most

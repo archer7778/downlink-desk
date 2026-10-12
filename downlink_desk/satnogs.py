@@ -7,6 +7,7 @@ inside that: at least 11 s between requests, honours Retry-After, gives up the
 cycle on long refusals, and never follows links off the SatNOGS host.
 """
 import json
+import math
 import os
 import time
 import urllib.error
@@ -138,11 +139,23 @@ def scheduled_observations(network_api, norad):
         st, en = parse_ts(o.get("start")), parse_ts(o.get("end"))
         if st is None or en is None:
             continue
-        out.append({"id": int(o["id"]), "start_ms": st, "end_ms": en, "station_id": o.get("ground_station"),
-                    "station_name": str(o.get("station_name") or "")[:80], "lat": o.get("station_lat"),
-                    "lng": o.get("station_lng"), "max_alt": o.get("max_altitude"),
-                    "mode": str(o.get("transmitter_description") or o.get("transmitter_mode") or "")[:80]})
+        try:   # one malformed record shouldn't lose the whole schedule
+            out.append({"id": int(o["id"]), "start_ms": st, "end_ms": en, "station_id": o.get("ground_station"),
+                        "station_name": str(o.get("station_name") or "")[:80], "lat": _f(o.get("station_lat"), 90),
+                        "lng": _f(o.get("station_lng"), 180), "max_alt": _f(o.get("max_altitude"), 90),
+                        "mode": str(o.get("transmitter_description") or o.get("transmitter_mode") or "")[:80]})
+        except (KeyError, TypeError, ValueError):
+            continue
     return out, complete
+
+
+def _f(v, lim):
+    """A coordinate or angle from outside data: a finite number within ±lim, else None."""
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return None
+    return v if math.isfinite(v) and -lim <= v <= lim else None
 
 
 def _next_link(header):
