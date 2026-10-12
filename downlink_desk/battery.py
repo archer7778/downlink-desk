@@ -14,6 +14,7 @@ and an estimated capacity left. Those rest on assumptions about the battery that
 may not publish, so every assumption lives in the channels file under "battery", with its source.
 """
 import math
+import random
 import statistics
 
 from . import db as dbm
@@ -29,6 +30,113 @@ MIN_SAMPLES = 20
 # doubling every 10 °C hotter. All of it can be overridden per satellite in its channels file.
 DEFAULT_LIFE = {"cycles_at_100_dod": 1000, "dod_exponent": 2.0, "eol_capacity": 0.8,
                 "calendar_fade_per_year": 0.02, "ref_temp_c": 25, "temp_doubling_c": 10}
+
+
+# ---------- maths helpers ----------
+
+# Open-circuit voltage of a typical 18650-type lithium-ion cell (NMC/LCO) against state of charge.
+# Generic: real cells differ by tens of millivolts, which is why capacity from it is "experimental".
+OCV = [(0.00, 3.00), (0.05, 3.45), (0.10, 3.55), (0.20, 3.62), (0.30, 3.66), (0.40, 3.70), (0.50, 3.75),
+       (0.60, 3.82), (0.70, 3.90), (0.80, 3.98), (0.90, 4.07), (1.00, 4.18)]
+
+
+def ocv_cell(soc):
+    soc = min(1.0, max(0.0, soc))
+    for (s0, v0), (s1, v1) in zip(OCV, OCV[1:]):
+        if soc <= s1:
+            return v0 + (v1 - v0) * (soc - s0) / (s1 - s0)
+    return OCV[-1][1]
+
+
+def _soc(v_cell):
+    if v_cell is None:
+        return None
+    if v_cell <= OCV[0][1]:
+        return 0.0
+    for (s0, v0), (s1, v1) in zip(OCV, OCV[1:]):
+        if v_cell <= v1:
+            return s0 + (s1 - s0) * (v_cell - v0) / (v1 - v0)
+    return 1.0
+
+
+def _rt(temp_c, ea=25_000.0):
+    """How much higher internal resistance is at this temperature than at 25 °C (Arrhenius)."""
+    if temp_c is None:
+        return 1.0
+    t = max(-40.0, min(70.0, temp_c)) + 273.15
+    return math.exp(ea / 8.314 * (1 / t - 1 / 298.15))
+
+
+def _slope(pts):
+    """Least-squares slope and correlation of y on x for points (t, x, y)."""
+    if len(pts) < 3:
+        return None
+    mx = sum(p[1] for p in pts) / len(pts)
+    my = sum(p[2] for p in pts) / len(pts)
+    sxx = sum((p[1] - mx) ** 2 for p in pts)
+    syy = sum((p[2] - my) ** 2 for p in pts)
+    sxy = sum((p[1] - mx) * (p[2] - my) for p in pts)
+    if sxx <= 0 or syy <= 0:
+        return None
+    return sxy / sxx, sxy / math.sqrt(sxx * syy)
+
+
+def _mean2(a, b):
+    v = [x for x in (a, b) if x is not None]
+    return sum(v) / len(v) if v else None
+
+
+def _slope2(pts):
+    """Fit y = R·x + β·dt for points (t, x, y, dt); returns (R, partial correlation of y with x)."""
+    if len(pts) < 5:
+        return None
+    sxx = sum(p[1] * p[1] for p in pts)
+    sdd = sum(p[3] * p[3] for p in pts)
+    sxd = sum(p[1] * p[3] for p in pts)
+    sxy = sum(p[1] * p[2] for p in pts)
+    sdy = sum(p[3] * p[2] for p in pts)
+    det = sxx * sdd - sxd * sxd
+    if det <= 0:
+        return None
+    r = (sxy * sdd - sdy * sxd) / det
+    beta = (sdy * sxx - sxy * sxd) / det
+    res = [p[2] - beta * p[3] for p in pts]   # remove the drift part, then correlate with current
+    mx = sum(p[1] for p in pts) / len(pts)
+    my = sum(res) / len(res)
+    cxx = sum((p[1] - mx) ** 2 for p in pts)
+    cyy = sum((y - my) ** 2 for y in res)
+    cxy = sum((p[1] - mx) * (y - my) for p, y in zip(pts, res))
+    return r, (cxy / math.sqrt(cxx * cyy) if cxx > 0 and cyy > 0 else 0.0)
+
+
+def _passes(pts, gap_ms=15 * 60_000):
+    """Group time-sorted tuples (t, ...) into passes; frames within one pass aren't independent."""
+    out, cur, last = [], [], None
+    for p in sorted(pts, key=lambda p: p[0]):
+        if last is not None and p[0] - last > gap_ms:
+            out.append(cur)
+            cur = []
+        cur.append(p)
+        last = p[0]
+    if cur:
+        out.append(cur)
+    return out
+
+
+def _boot(groups, stat, n=200):
+    """90% range of a statistic by resampling whole passes."""
+    if len(groups) < 5:
+        return None
+    rnd = random.Random(len(groups))
+    vals = []
+    for _ in range(n):
+        v = stat([groups[rnd.randrange(len(groups))] for _ in groups])
+        if v is not None:
+            vals.append(v)
+    if len(vals) < n // 2:
+        return None
+    vals.sort()
+    return vals[int(.05 * len(vals))], vals[int(.95 * len(vals)) - 1]
 
 
 def _med(v):
@@ -70,7 +178,18 @@ def _volt_scale(b, raw):
     return None
 
 
-def _bins(rows, key, period):
+def _clipped_mean(v):
+    """Mean, after dropping readings wildly out of line (decoding glitches). Currents are averaged
+    rather than taking the median, because short bursts (the radio transmitting) really use charge."""
+    if not v:
+        return None
+    m = statistics.median(v)
+    s = 1.4826 * statistics.median([abs(x - m) for x in v]) or (max(v) - min(v)) or 1.0
+    keep = [x for x in v if abs(x - m) <= 8 * s]
+    return sum(keep) / len(keep)
+
+
+def _bins(rows, key, period, agg=None):
     nb = max(1, int(math.ceil(period / BIN)))
     by = [[] for _ in range(nb)]
     for r in rows:
@@ -79,7 +198,7 @@ def _bins(rows, key, period):
     out = []
     for i in range(nb):
         pool = by[i] + by[(i - 1) % nb] + by[(i + 1) % nb]
-        out.append(_med(pool) if len(pool) >= 3 else None)
+        out.append((agg or _med)(pool) if len(pool) >= 3 else None)
     return out, by
 
 
@@ -137,7 +256,7 @@ def analyse(conn, spec, norad, launched=None, now=None):
 
     # ---- energy balance over one orbit ----
     nb = max(1, int(math.ceil(period / BIN)))
-    net_b, net_raw = _bins(phased, "net", period)
+    net_b, net_raw = _bins(phased, "net", period, _clipped_mean)
     v_b, _ = _bins(phased, "v", period)
     cover = sum(1 for x in net_raw if x) / nb
     netf = _fill(net_b)
@@ -165,10 +284,7 @@ def analyse(conn, spec, norad, launched=None, now=None):
     if shadow and sunset is not None:
         shade_net = [r["net"] for r in phased if r["net"] is not None and r["phase"] >= sunset]
         if len(shade_net) >= 5:   # average drain in shadow (trimmed mean: energy needs a mean) × time in shadow
-            sv = sorted(shade_net)
-            k = len(sv) // 20
-            sv = sv[k:len(sv) - k] or sv
-            used = -sum(sv) / len(sv) * shadow / 60
+            used = -_clipped_mean(shade_net) * shadow / 60
         else:
             used = None
         if used is not None:
@@ -231,32 +347,118 @@ def analyse(conn, spec, norad, launched=None, now=None):
                         f"{lo_d}–{hi_d} °C; {bad_c} charging and {bad_d} other samples fell outside. "
                         "The pack has a heater, so cold readings are usually brief."))
 
-    # ---- effective internal resistance ----
-    if scale and netf and vf:
+    # ---- effective internal resistance, normalised to 25 °C ----
+    # Remove the orbit pattern from voltage and current, then ask how much the voltage moves per amp.
+    # Lithium-ion resistance roughly doubles from 25 °C down to 0 °C (Arrhenius, Ea ≈ 25 kJ/mol), so
+    # each sample is put on a 25 °C footing before the fit; that way a cold week doesn't look like ageing.
+    r25 = None
+    method = None
+    if scale:
+        # Best: frames seconds apart in the same pass. State of charge and temperature can't change
+        # in that time, but the current does (the radio transmitting), so ΔV/ΔI is the resistance.
+        # A small Δt term soaks up the slow drift in charge across the pair.
+        seq = [r for r in recent if r["v"] is not None and r["net"] is not None]
         pairs = []
+        for a, b_ in zip(seq, seq[1:]):
+            dt = (b_["t"] - a["t"]) / 1000
+            if 0 < dt <= 180 and abs(b_["net"] - a["net"]) >= 20:
+                f = _rt(_mean2(a["temp"], b_["temp"]))
+                pairs.append((a["t"], (b_["net"] - a["net"]) * f, b_["v"] - a["v"], dt))
+        if len(pairs) >= 20:
+            method = "within-pass"
+            fitr = _slope2(pairs)
+        elif netf and vf:
+            # Fallback: remove the orbit pattern from voltage and current, then ask how much the
+            # voltage moves per amp across many passes.
+            method = "across-orbits"
+            pairs = []
+            for r in phased:
+                if r["v"] is None or r["net"] is None:
+                    continue
+                i = int(r["phase"] // BIN) % nb
+                pairs.append((r["t"], (r["net"] - netf[i]) * _rt(r["temp"]), r["v"] - vf[i]))
+            fitr = _slope(pairs)
+        else:
+            fitr = None
+        res["resistance_method"] = method
+        if fitr and len(pairs) >= 30:
+            r_ohm, corr = fitr[0] * 1000, fitr[1]          # V per mA → ohms
+            ok = corr > 0.3 and 0 < r_ohm < 2
+            res["resistance_mohm"] = round(r_ohm * 1000)
+            res["resistance_corr"] = round(corr, 2)
+            if ok:
+                r25 = r_ohm
+                sl = _slope2 if method == "within-pass" else _slope
+                rng = _boot(_passes(pairs), lambda ps: (sl([x for g in ps for x in g]) or [None])[0], 200)
+                if rng:
+                    res["resistance_range_mohm"] = [round(rng[0] * 1e6), round(rng[1] * 1e6)]
+                # ageing check: first half of the window against the second
+                if pairs[-1][0] - pairs[0][0] >= 10 * DAY:
+                    mid = pairs[0][0] + (pairs[-1][0] - pairs[0][0]) / 2
+                    sl = _slope2 if method == "within-pass" else _slope
+                    a, b2 = sl([p for p in pairs if p[0] < mid]), sl([p for p in pairs if p[0] >= mid])
+                    if a and b2 and a[0] > 0:
+                        res["resistance_change_pct"] = round((b2[0] / a[0] - 1) * 100, 1)
+            ch = res.get("resistance_change_pct")
+            rr = res.get("resistance_range_mohm")
+            C.append(_check("res", "Internal resistance (at 25 °C)", "info" if ok else "unknown",
+                            f"{r_ohm * 1000:.0f} mΩ" if ok else "—",
+                            (f"How much the voltage sags per amp, corrected to 25 °C, from {len(pairs)} "
+                             f"{'pairs of frames seconds apart' if method == 'within-pass' else 'frames'} in "
+                             f"{len(_passes(pairs))} passes (90% range {rr[0]}–{rr[1]} mΩ, correlation {corr:.2f}). " if ok and rr else "")
+                            + (f"Change across the window: {ch:+.0f}%. " if ch is not None else "")
+                            + ("It includes wiring and sensing, so the trend matters more than the number: cells age "
+                               "by rising resistance." if ok else f"Not clear yet from {len(pairs)} frames (correlation "
+                               f"{corr:.2f}); needs more passes with varied current.")))
+
+    # ---- state of charge and measured capacity (experimental) ----
+    # Voltage minus the resistive sag gives the open-circuit voltage, and a lithium-ion cell's
+    # open-circuit voltage maps to its state of charge. Through the eclipse we know how much charge
+    # has been drawn (the measured currents, integrated from sunset). Charge drawn ÷ fall in state of
+    # charge = capacity: a measurement of how much the battery actually holds, not the datasheet figure.
+    if scale and netf and shadow and sunset is not None:
+        cells = b.get("cells_series") or max(1, round(b["v_full"] / 4.2))
+        r_use = (r25 if r25 is not None else 0.1)
+        # charge drawn since sunset, at each phase (mAh), from the orbit's average net current
+        drawn, acc, step = {}, 0.0, BIN / 60
+        for i in range(nb):
+            mid = (i + .5) * BIN
+            if mid >= sunset:
+                acc += -netf[i] * step
+                drawn[i] = acc - (-netf[i] * step) / 2
+        pts = []
         for r in phased:
-            if r["v"] is None or r["net"] is None:
+            if r["v"] is None or r["net"] is None or r["phase"] < sunset:
                 continue
             i = int(r["phase"] // BIN) % nb
-            pairs.append((r["net"] - netf[i], r["v"] - vf[i]))
-        if len(pairs) >= 30:
-            mx = sum(p[0] for p in pairs) / len(pairs)
-            my = sum(p[1] for p in pairs) / len(pairs)
-            sxx = sum((p[0] - mx) ** 2 for p in pairs)
-            syy = sum((p[1] - my) ** 2 for p in pairs)
-            sxy = sum((p[0] - mx) * (p[1] - my) for p in pairs)
-            if sxx > 0 and syy > 0:
-                r_ohm = sxy / sxx * 1000          # V per mA → ohms
-                corr = sxy / math.sqrt(sxx * syy)
-                res["resistance_mohm"] = round(r_ohm * 1000)
-                res["resistance_corr"] = round(corr, 2)
-                ok = corr > 0.3 and 0 < r_ohm < 2
-                C.append(_check("res", "Effective internal resistance", "info" if ok else "unknown",
-                                f"{r_ohm * 1000:.0f} mΩ" if ok else "—",
-                                (f"How much the voltage moves per amp of current, from {len(pairs)} frames (correlation {corr:.2f}). "
-                                 "Includes wiring and sensing, so the number matters less than its trend: it rises as cells age."
-                                 if ok else f"Not clear yet from {len(pairs)} frames (correlation {corr:.2f}); "
-                                 "needs more passes with varied current.")))
+            if i not in drawn:
+                continue
+            ocv = r["v"] - r_use * _rt(r["temp"]) * r["net"] / 1000
+            soc = _soc(ocv / cells)
+            if soc is not None:
+                pts.append((r["t"], drawn[i], soc))
+        if len(pts) >= 15 and (max(p[1] for p in pts) - min(p[1] for p in pts)) > 0.3 * (res.get("eclipse_mah") or 1):
+            fitc = _slope([(t, x, y) for t, x, y in pts])
+            if fitc and fitc[0] < 0:
+                cap = -1 / fitc[0]
+                rng = _boot(_passes(pts), lambda ps: (lambda f: -1 / f[0] if f and f[0] < 0 else None)(
+                    _slope([x for g in ps for x in g])), 200)
+                res["capacity_measured_mah"] = round(cap)
+                if rng:
+                    res["capacity_range_mah"] = [round(rng[0]), round(rng[1])]
+                frac = cap / cap_mah
+                res["capacity_vs_rated"] = round(frac, 3)
+                top = _med([_soc((r["v"] - r_use * _rt(r["temp"]) * (r["net"] or 0) / 1000) / cells) for r in phased
+                            if r["v"] is not None and r["phase"] is not None and sunset - 15 <= r["phase"] < sunset])
+                if top is not None:
+                    res["soc_top"] = round(top, 3)
+                st = "ok" if frac >= 0.85 else "warn" if frac >= 0.7 else "crit"
+                cr = res.get("capacity_range_mah")
+                C.append(_check("capacity", "Measured capacity (experimental)", st, f"≈{cap:,.0f} mAh",
+                                f"From {len(pts)} eclipse frames: charge drawn since sunset against the fall in state of "
+                                f"charge read from voltage{f' (90% range {cr[0]:,}–{cr[1]:,} mAh)' if cr else ''}. That is "
+                                f"{frac:.0%} of the assumed {cap_mah:,.0f} mAh. It relies on a generic lithium-ion voltage "
+                                "curve, so treat it as a cross-check on the model below, not a calibrated reading."))
 
     # ---- cycles and modelled life ----
     if launched and shadow:

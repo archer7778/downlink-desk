@@ -220,7 +220,13 @@ def test_model_spaceweather_summary_stream():
                          if k in ("bat_t", "psu_t")})
         assert by["bat_t"]["status"] == "drift" and 2.4 < by["bat_t"]["shift"] < 3.6
         assert by["psu_t"]["status"] == "normal" and abs(by["psu_t"]["shift"]) < .5
-        assert by["bat_t"]["sigma"] < 1.0   # the orbit swing (±6 °C) is explained, not counted as noise
+        assert by["bat_t"]["sigma"] < 0.5   # the orbit swing (±6 °C) is explained, not counted as noise
+        lo, hi = by["bat_t"]["shift_range"]
+        assert lo < 3.0 < hi or abs(by["bat_t"]["shift"] - 3.0) < 0.3, by["bat_t"]["shift_range"]
+        ch = by["bat_t"].get("change")
+        print("change:", ch and round((now - ch["began"]) / 3600_000, 1), "h ago; seasonal", by["bat_t"]["seasonal_per_min"])
+        assert ch and abs((now - ch["began"]) - 2 * 86_400_000) < 8 * 3600_000 and ch["direction"] == "up"
+        assert abs(by["bat_t"]["seasonal_per_min"] - 0.4) < 0.15
         assert "uhf_digi" not in by and "uhf_boots" not in by
         assert by["bat_t"]["n_unusual"] < 3   # a drift is reported once as a drift, not as dozens of oddities
         # a channel that spikes routinely (like discharge current when the radio transmits) isn't "unusual"
@@ -326,6 +332,61 @@ def test_model_spaceweather_summary_stream():
         shutil.rmtree(tmp)
 
 
+def test_forensics_and_silence():
+    """Restarts timed from uptime counters land where they really happened, a cluster over the
+    South Atlantic Anomaly is called out, and misses by reliable stations count for more."""
+    from downlink_desk import forensics
+    from downlink_desk.analysis import silence_probability
+    from downlink_desk.orbit import in_saa, state
+    from sgp4.api import Satrec
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        cfg = make_cfg(tmp, 8774)
+        conn = dbm.open_db(cfg)
+        dbm.smeta_set(conn, 60237, "tle", {"tle1": mock_satnogs.TLE[0], "tle2": mock_satnogs.TLE[1], "epoch_ms": dbm.now_ms()})
+        sat = Satrec.twoline2rv(*mock_satnogs.TLE)
+        now = dbm.now_ms()
+        # pick restart moments: four over the SAA, one elsewhere
+        saa_times, other = [], None
+        t = now - 9 * 86_400_000
+        while len(saa_times) < 4 or other is None:
+            st = state(sat, t)
+            deep = ((st["lat"] + 25) / 22) ** 2 + ((st["lon"] + 45) / 60) ** 2 < 0.25   # well inside, not at the edge
+            if deep and (not saa_times or t - saa_times[-1] > 1.5 * 86_400_000):
+                saa_times.append(t)
+            elif other is None and t > now - 3 * 86_400_000 and not in_saa(st["lat"], st["lon"]) and abs(st["lat"]) > 40:
+                other = t
+            t += 60_000
+        boots = sorted(saa_times[:4] + [other])
+        fid = 0
+        for k in range(10 * 12):   # an uptime reading every 2 hours, in hours, like GRBBeta's
+            ts = now - 10 * 86_400_000 + k * 7_200_000 + 1234
+            last = max([b for b in boots if b <= ts], default=now - 60 * 86_400_000)
+            fid += 1
+            conn.execute("INSERT INTO frames(id,ts_ms,frame_hex,decoded_ok,fetched_ms,norad) VALUES(?,?,?,1,?,60237)",
+                         (fid, ts, "u%04x" % fid, ts))
+            conn.execute("INSERT INTO points(ts_ms,channel,value,frame_id,norad) VALUES(?,?,?,?,60237)",
+                         (ts, "uhf_up", round((ts - last) / 3_600_000, 1), fid))
+        conn.commit()
+        r = forensics.restarts(conn, cfg.channels(), 60237, 30)
+        got = [f for f in r["restarts"] if f["exact"]]
+        print("restarts:", len(got), r["stats"], "|", forensics.summary(r))
+        assert len(got) == 5
+        assert all(min(abs(f["t"] - b) for b in boots) < 6 * 60_000 for f in got)   # within the 0.1 h rounding
+        assert r["stats"]["in_saa"] == 4 and r["stats"]["saa_p_value"] < 0.05
+        # silence: the same three misses mean very different things from good and flaky stations
+        def obs(station, status, i):
+            return {"id": i, "station": station, "status": status, "max_alt": 40, "end": i}
+        good = [obs("Reliable", "heard", i) for i in range(20)]
+        flaky = [obs("Flaky", "heard" if i % 6 == 0 else "nothing", 100 + i) for i in range(18)]
+        a = silence_probability(good + flaky + [obs("Reliable", "nothing", 200 + i) for i in range(3)], cfg)
+        b = silence_probability(good + flaky + [obs("Flaky", "nothing", 200 + i) for i in range(3)], cfg)
+        print("silence: reliable station missed 3 ->", a["probability"], "| flaky station missed 3 ->", b["probability"])
+        assert a["probability"] > 0.8 and b["probability"] < 0.2
+    finally:
+        shutil.rmtree(tmp)
+
+
 def test_history_fill():
     """A fresh install only takes the newest page; history then fills in from SatNOGS by time window."""
     httpd, state, frames = mock_satnogs.serve(8773)
@@ -371,37 +432,46 @@ def test_battery_health():
         P = period_min(Satrec.twoline2rv(*mock_satnogs.TLE))
         from downlink_desk.orbit import shadow_minutes
         sh = shadow_minutes(*mock_satnogs.TLE, dbm.now_ms())
-        sunset, cap, R = P - sh, 20 / 7.4 * 1000, 0.12
-        use = sh * 450 / 60
+        sunset, cap, R25 = P - sh, 20 / 7.4 * 1000, 0.10
+        use = sh * 540 / 60   # average draw in shadow: 450 mA plus transmit bursts (30% of the time, +300 mA)
         rnd = random.Random(5)
         now = dbm.now_ms()
-        for i in range(14 * 72):
-            t = now - 14 * 86_400_000 + i * 1_200_000
-            ph = rnd.uniform(0, P)
+        for i in range(14 * 72 * 3):
+            # passes of three frames 40 s apart, every 20 minutes; the radio transmits on some frames
+            t = now - 14 * 86_400_000 + (i // 3) * 1_200_000 + (i % 3) * 40_000
+            if i % 3 == 0:
+                ph0 = rnd.uniform(0, P)
+            ph = (ph0 + (i % 3) * 40 / 60) % P
             if ph >= sunset:
-                soc, ic, idc = 1 - (ph - sunset) * 450 / 60 / cap, 0.0, 450.0
+                soc, ic, idc = 1 - (ph - sunset) * 540 / 60 / cap, 0.0, 450.0
             else:
-                soc, ic, idc = min(1.0, 1 - use / cap + ph * 300 / 60 / cap), 750.0, 450.0
+                soc, ic, idc = min(1.0, 1 - use / cap + ph * 360 / 60 / cap), 900.0, 450.0
             ic = max(0.0, ic + rnd.gauss(0, 50)) if ic else 0.0
-            idc += rnd.gauss(0, 50)
-            v = 7.4 + 1.0 * soc + R * (ic - idc) / 1000 + rnd.gauss(0, .003)
+            idc += rnd.gauss(0, 50) + (300 if rnd.random() < .3 else 0)
+            temp = 12 + 6 * (1 if ph < sunset else -1) + rnd.gauss(0, 1)
+            # two cells on a real lithium-ion voltage curve, sagging with a resistance that rises in the cold
+            v = 2 * battery.ocv_cell(soc) + R25 * battery._rt(temp) * (ic - idc) / 1000 + rnd.gauss(0, .003)
             fid = 700000 + i
             conn.execute("INSERT INTO frames(id,ts_ms,frame_hex,decoded_ok,fetched_ms,norad,sunlit,phase_min,shadow_min)"
                          " VALUES(?,?,?,1,?,60237,?,?,?)", (fid, t, "b%05x" % i, t, 0 if ph >= sunset else 1, ph, sh))
             conn.executemany("INSERT INTO points(ts_ms,channel,value,frame_id,norad) VALUES(?,?,?,?,60237)",
                              [(t, "bat_v", round(v / 0.0005), fid), (t, "bat_chg", ic, fid), (t, "bat_dis", idc, fid),
-                              (t, "bat_t", 12 + 6 * (1 if ph < sunset else -1) + rnd.gauss(0, 1), fid)])
+                              (t, "bat_t", temp, fid)])
         conn.commit()
         r = battery.analyse(conn, spec, 60237, "2024-07-09")
         print("battery:", {k: r.get(k) for k in ("grade", "volt_scale", "balance_mah", "dod", "v_top", "v_end_eclipse",
                                                  "resistance_mohm", "cycles", "life")})
         for c in r["checks"]:
             print(f"  [{c['status']}] {c['title']}: {c['value']}")
-        expect_bal = (sunset * 300 - sh * 450) / 60
+        expect_bal = (sunset * 360 - sh * 540) / 60
         assert r["volt_scale"] == 0.0005
         assert abs(r["balance_mah"] - expect_bal) < 25, (r["balance_mah"], expect_bal)
         assert abs(r["dod"] - use / cap) < 0.02, (r["dod"], use / cap)
-        assert 80 < r["resistance_mohm"] < 160, r["resistance_mohm"]
+        assert 75 < r["resistance_mohm"] < 125, r["resistance_mohm"]   # 100 mΩ at 25 °C went in
+        lo, hi = r["resistance_range_mohm"]
+        assert lo < 100 < hi or abs(r["resistance_mohm"] - 100) < 15
+        print("capacity:", r.get("capacity_measured_mah"), r.get("capacity_range_mah"), "of", round(cap))
+        assert abs(r["capacity_measured_mah"] - cap) / cap < 0.2   # the pack really holds 2703 mAh
         assert r["cycles"] > 10_000 and 0.8 < r["life"]["capacity_now"] < 1.0
         assert r["grade"] in ("good", "watch")
         print(" ", battery.summary_line(r))
@@ -415,4 +485,5 @@ if __name__ == "__main__":
     test_model_spaceweather_summary_stream()
     test_battery_health()
     test_history_fill()
+    test_forensics_and_silence()
     print("OK")

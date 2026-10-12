@@ -57,6 +57,7 @@ def export(cfg, out, refresh_hours=6, log=print):
     model = app.model(sat)
     _w(api / "model.json", model)
     _w(api / "battery.json", app.battery(sat))
+    _w(api / "restarts.json", app.restarts(sat))
     _w(api / "spaceweather.json", app.spaceweather(7))
     summ = app.summary()
     summ.update(phone=False, text="\n".join(l for l in summ.get("text", "").splitlines()
