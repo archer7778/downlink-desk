@@ -8,6 +8,12 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 USER_NAME="$(id -un)"
 cd "$ROOT"
 
+if [ "$(id -u)" -eq 0 ]; then
+  echo "Run this as your normal user (it asks for sudo when it needs it), not with sudo:"
+  echo "  ./deploy/install.sh"
+  exit 1
+fi
+
 say() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 
 say "1/5  Installing system packages (needs your password once)"
@@ -58,8 +64,9 @@ for unit in downlink-desk-web.service downlink-desk-fetch.service downlink-desk-
   sed -e "s#@ROOT@#${ROOT}#g" -e "s#@USER@#${USER_NAME}#g" "deploy/${unit}" | sudo tee "/etc/systemd/system/${unit}" >/dev/null
 done
 cfgval() { awk -F= -v k="$1" '$1 ~ "^"k"[ ]*$" {sub(/#.*/,"",$2); gsub(/[ "]/,"",$2); print $2; exit}' config.toml; }
-POLL=$(cfgval poll_minutes); POLL=${POLL:-30}
-[ "$POLL" -lt 20 ] && POLL=20
+POLL=$(cfgval poll_minutes); POLL=${POLL%%.*}
+[[ "$POLL" =~ ^[0-9]+$ ]] || POLL=30
+if [ "$POLL" -lt 20 ]; then POLL=20; fi
 sudo sed -i "s#^OnUnitActiveSec=.*#OnUnitActiveSec=${POLL}min#" /etc/systemd/system/downlink-desk-fetch.timer
 sudo systemctl daemon-reload
 sudo systemctl enable --now downlink-desk-web.service downlink-desk-fetch.timer downlink-desk-update.timer >/dev/null

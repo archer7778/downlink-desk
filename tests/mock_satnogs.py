@@ -149,6 +149,34 @@ def serve(port, token="test-token", page_size=25, require_token=True):
         def do_GET(self):
             state["requests"] += 1
             u = urlparse(self.path)
+            mode = (state.get("chaos") or {}).get(u.path)   # fault injection for failure tests
+            if mode == "drop":
+                self.close_connection = True
+                return
+            if mode == "half":
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", "5000")
+                self.end_headers()
+                self.wfile.write(b'{"next": null, "results": [{"times')
+                self.close_connection = True
+                return
+            if mode == "html":
+                b = b"<html><body>502 Bad Gateway</body></html>"
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.send_header("Content-Length", str(len(b)))
+                self.end_headers()
+                self.wfile.write(b)
+                return
+            if mode == "500":
+                return self._json({"detail": "server error"}, 500)
+            if mode == "junk":
+                return self._json([1, "x", None, [2], {"timestamp": 5, "frame": 7}, {"norad_cat_id": "abc", "telemetries": "z"}])
+            if mode == "badtle":
+                return self._json([{"tle1": "1 garbage", "tle2": "2 more garbage", "norad_cat_id": 60237}])
+            if mode == "error_obj":
+                return self._json({"detail": "Not found."})
             q = {k: v[0] for k, v in parse_qs(u.query).items()}
             base = f"http://127.0.0.1:{port}"
             if u.path == "/api/tle/":

@@ -560,6 +560,8 @@ function derive(now){
       prev=v}}
   // data freshness
   const stale=(CONF.stale_hours||12)*HOUR,dec=FRAMES.filter(f=>f[4]).map(f=>f[1]);
+  // silent for longer than the frames the console keeps: the gap still starts at the last decoded frame
+  if(!dec.length&&HEALTH&&HEALTH.last_decoded_ms)dec.push(HEALTH.last_decoded_ms);
   for(let i=0;i<dec.length;i++){const a=dec[i],b=i+1<dec.length?dec[i+1]:null,gapEnd=b??now;
     if(gapEnd-a>stale){const key='stale',t0=a+stale;
       bad(key,'warn',t0,`No decoded frames for ${ago(Math.min(gapEnd,now)-a)} (since ${fmtDT(a)})`,null);
@@ -575,10 +577,10 @@ function derive(now){
   }
   // scheduled observations that delivered nothing, several in a row
   if(OBS&&OBS.silent_streak&&OBS.silent_streak.length>=OBS.silent_after){
-    const ids=new Set(OBS.silent_streak),st=OBS.observations.filter(o=>ids.has(o.id));
-    const last=st[st.length-1],names=[...new Set(st.map(o=>o.station))].join(', ');
+    const ids=new Set(OBS.silent_streak),st=(OBS.silent_detail&&OBS.silent_detail.length?OBS.silent_detail:OBS.observations.filter(o=>ids.has(o.id))).slice().sort((a,b)=>a.end-b.end);
+    if(st.length){const last=st[st.length-1],names=[...new Set(st.map(o=>o.station))].join(', ');
     alerts.push({id:akey('silent')+'@'+st[0].id,key:akey('silent'),sev:'crit',sev0:'crit',raised:last.end+(CONF.alerts.upload_grace_hours||3)*HOUR,cleared:null,
-      msg:`${st.length} scheduled observations in a row produced no frames (${names}).`+(OBS.silence&&OBS.silence.basis==='probability'?` Given how reliably those stations usually hear it, there is a ${Math.round(OBS.silence.probability*100)}% chance it has really gone quiet`:' The satellite may have gone quiet, or those stations had trouble'),first:''});
+      msg:`${st.length} scheduled observations in a row produced no frames (${names}).`+(OBS.silence&&OBS.silence.basis==='probability'?` Given how reliably those stations usually hear it, there is a ${Math.round(OBS.silence.probability*100)}% chance it has really gone quiet`:' The satellite may have gone quiet, or those stations had trouble'),first:''})}
   }
   const cut=CONF.commissioned_ms||0;
   const kept=alerts.filter(a=>a.raised>=cut||a.cleared==null);
@@ -662,7 +664,7 @@ let shelveOpen=null,lastAlertSig='';
 function alertRow(a){
   const sevL=a.event?'Event':a.sev==='crit'?'Alarm':'Caution';let acts='';
   if(!a.closed){acts=a.shelved?`<button class="btn sm" data-unshelve="${esc(a.key)}">Unshelve</button>`:(a.ack?'<span class="label">Acked</span>':`<button class="btn sm primary" data-ack="${esc(a.id)}">Acknowledge</button>`)+(a.event?'':`<button class="btn sm" data-shelve="${esc(a.id)}">Shelve</button>`)}
-  const meta=[`Raised ${fmtDT(a.raised)}`,a.esc?'escalated '+fmtT(a.esc):'',a.event?'':(a.cleared==null?'condition active':'cleared '+fmtDT(a.cleared)),a.ack?`acked by ${esc(a.ack.cs)} ${fmtHM(a.ack.t)}`:'',a.shelved?`shelved by ${esc(a.shelved.cs)} until ${fmtHM(a.shelved.until)}: ${esc(a.shelved.reason)}`:''].filter(Boolean).join(' · ');
+  const meta=[`Raised ${fmtDT(a.raised)}`,a.esc?'escalated '+fmtDT(a.esc):'',a.event?'':(a.cleared==null?'condition active':'cleared '+fmtDT(a.cleared)),a.ack?`acked by ${esc(a.ack.cs)} ${fmtDT(a.ack.t)}`:'',a.shelved?`shelved by ${esc(a.shelved.cs)} until ${fmtDT(a.shelved.until)}: ${esc(a.shelved.reason)}`:''].filter(Boolean).join(' · ');
   const shelf=shelveOpen===a.id?`<form class="shelf" data-shelf="${esc(a.id)}"><select class="txt" id="shelfDur" aria-label="Shelve for"><option value="60">1 hour</option><option value="360" selected>6 hours</option><option value="1440">1 day</option><option value="10080">1 week</option></select><input class="txt" id="shelfReason" maxlength="160" placeholder="Reason (required)" aria-label="Reason"><button class="btn sm primary" type="submit">Shelve</button><button class="btn sm" type="button" data-shelfcancel>Cancel</button></form>`:'';
   return `<div class="alert${a.closed?' closed':''}${a.shelved?' shelved':''}"><span class="pill ${a.event?'acc':a.sev}">${sevL}</span><span class="msg">${a.ch&&CHM[a.ch]?`<a href="#" data-chlink="${esc(a.ch)}" style="color:inherit">${esc(a.msg)}</a>`:esc(a.msg)}</span><span class="acts">${acts}</span><span class="meta">${meta}</span>${shelf}</div>`;
 }
@@ -1266,7 +1268,7 @@ async function poll(kind){
       // first load: the last 8 days; after that only frames stored since we last asked
       do{j=await api(MAXID?'/api/telemetry?after_id='+MAXID:'/api/telemetry?since='+(Date.now()-8*DAY));addTelemetry(j);Object.keys(j.channels).forEach(c=>seen.add(c))}while(j.more&&MAXID);
       if(CONF&&CONF.spec.auto&&[...seen].some(ch=>!CHM[ch])){CONF=await api('/api/config');CH=CONF.spec.channels||[];CHM=Object.fromEntries(CH.map(c=>[c.id,c]));buildTlm();renderAbout()}}
-    if(kind==='log'){const after=LOG.length?LOG[LOG.length-1].seq:0;const add=await api('/api/log?after='+after);if(add.length){LOG.push(...add);buildCfg()}}
+    if(kind==='log'){let add,got=false;do{const after=LOG.length?LOG[LOG.length-1].seq:0;add=await api('/api/log?after='+after);if(add.length){LOG.push(...add);got=true}}while(add.length>=5000);if(got)buildCfg()}
     if(kind==='health')HEALTH=await api('/api/health');
     if(kind==='passes')PASSES=await api('/api/passes?hours=36');
     if(kind==='obs'){OBS=await api('/api/observations?days=3');drawGlobe()}

@@ -230,7 +230,7 @@ class _Fit:
 
 
 def _passes(rows, gap_ms=15 * 60_000):
-    """Group time-sorted samples into passes: frames heard within 20 minutes of each other.
+    """Group time-sorted samples into passes.
     Frames heard within 15 minutes of each other share the satellite's state at that moment, so they aren't independent
     evidence; the statistics below count passes, not frames."""
     groups, cur, last = [], [], None

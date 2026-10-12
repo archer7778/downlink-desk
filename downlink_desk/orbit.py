@@ -95,6 +95,19 @@ def passes(tle1, tle2, start_ms, hours, lat, lon, alt_m=0.0, min_el=10.0, step_s
     return out
 
 
+def valid_tle(tle1, tle2):
+    """True if the two lines parse and propagate: a garbled TLE from upstream must never replace a
+    good one, since every orbit calculation would then fail."""
+    try:
+        if not (isinstance(tle1, str) and isinstance(tle2, str) and tle1.startswith("1 ") and tle2.startswith("2 ")):
+            return False
+        sat = Satrec.twoline2rv(tle1.strip(), tle2.strip())
+        e, r, _ = sat.sgp4(sat.jdsatepoch, sat.jdsatepochF)
+        return e == 0 and all(math.isfinite(x) for x in r) and math.isfinite(tle_epoch_ms(tle1))
+    except Exception:
+        return False
+
+
 def tle_epoch_ms(tle1):
     import datetime as _dt
     yy = int(tle1[18:20])
@@ -195,7 +208,8 @@ def sun_phases(tle1, tle2, times):
         while j + 1 < len(ts) and ts[j + 1] - ts[j] < P:
             j += 1
         a, b = ts[i] - int(2.2 * P), ts[j] + 60_000
-        ecl = [e for e in eclipses(tle1, tle2, a, b, 30) if e[1] < b]   # drop one still going at the end
+        allecl = eclipses(tle1, tle2, a, b, 30)
+        ecl = [e for e in allecl if e[1] < b]   # drop one still going at the end
         rises = [e[1] for e in ecl]
         lens = [None if e[0] <= a else (e[1] - e[0]) / 60_000 for e in ecl]   # first may be cut off
         for t in ts[i:j + 1]:
@@ -203,7 +217,8 @@ def sun_phases(tle1, tle2, times):
             if k >= 0 and t - rises[k] <= 1.05 * P:
                 ln = lens[k] if lens[k] is not None else (lens[k + 1] if k + 1 < len(lens) else None)
                 out[t] = (round((t - rises[k]) / 60_000, 2), None if ln is None else round(ln, 1))
-            elif not ecl:
+            elif not ecl or (k == len(rises) - 1 and not any(e[0] <= t for e in allecl if e[1] >= b)):
+                # no shadow at all, or none for over an orbit since the last one: a full-sunlight season
                 out[t] = (None, 0.0)
             else:
                 out[t] = (None, None)

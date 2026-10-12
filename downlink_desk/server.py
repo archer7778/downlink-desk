@@ -270,6 +270,9 @@ class App:
                           self.data_sig(sat["norad"]) + (refreshed, now // 600_000))
         return {"now": now, "observations": rep, "refreshed_ms": refreshed,
                 "silent_streak": [o["id"] for o in sil["streak"]] if sil["silent"] else [], "silent_after": 1,
+                # the streak can reach back further than the observations listed, so send it whole
+                "silent_detail": sorted(({"id": o["id"], "station": o["station"], "end": o["end"]} for o in sil["streak"]),
+                                        key=lambda o: o["end"]) if sil["silent"] else [],
                 "silence": {k: v for k, v in sil.items() if k != "streak"},
                 "missed_run": [o["id"] for o in sil["streak"]]}
 
@@ -325,7 +328,8 @@ class App:
             fetches = [dict(r) for r in c.execute("SELECT * FROM fetches WHERE norad=? OR norad IS NULL "
                                                          "ORDER BY id DESC LIMIT 60", (n,))]
             counts = self.cached(("counts", n), 300, lambda: dict(c.execute(
-                "SELECT COUNT(*) n, MAX(ts_ms) last, SUM(decoded_ok) ok FROM frames WHERE norad=?", (n,)).fetchone()),
+                "SELECT COUNT(*) n, MAX(ts_ms) last, SUM(decoded_ok) ok, MAX(CASE WHEN decoded_ok=1 THEN ts_ms END) last_ok "
+                "FROM frames WHERE norad=?", (n,)).fetchone()),
                 self.data_sig())
             tle = dbm.smeta_get(c, n, "tle") or {}
             satmeta = dbm.smeta_get(c, n, "satellite") or {}
@@ -341,6 +345,7 @@ class App:
                 "last_ok_ms": last_ok, "auth_error": auth_error,
                 "token_present": bool(self.cfg.token), "fetches": fetches,
                 "frames_total": counts["n"], "frames_decoded": counts["ok"] or 0, "last_frame_ms": counts["last"],
+                "last_decoded_ms": counts["last_ok"],
                 "db_bytes": size, "tle_epoch_ms": tle.get("epoch_ms"), "satellite": satmeta,
                 "fetching": self._fetching, "storage": store, "update": upd,
                 "auto_update": bool(self.cfg["updates"].get("auto_update", True)), "version": __version__}
@@ -493,16 +498,19 @@ class App:
                 self._publish(evs)
 
     def fetch_now(self, sat=None):
-        if self._fetching:
-            return False, "A fetch is already running."
         with self.ro() as c:
             last = dbm.smeta_get(c, sat["norad"], "last_attempt_ms", 0) if sat else dbm.meta_get(c, "last_attempt_ms", 0)
             never_ok = bool(sat) and dbm.smeta_get(c, sat["norad"], "last_ok_ms") is None
-        if dbm.now_ms() - (last or 0) < 120_000 and not never_ok:
-            return False, "Fetched less than two minutes ago. SatNOGS is volunteer-run, so give it a moment."
+        with self.lock:   # check and claim in one step, so two quick clicks can't both start one
+            if self._fetching:
+                return False, "A fetch is already running."
+            # a satellite never fetched yet may go sooner (it was probably just added), but a failing
+            # one still can't be retried back to back
+            if dbm.now_ms() - (last or 0) < (20_000 if never_ok else 120_000):
+                return False, "Fetched less than two minutes ago. SatNOGS is volunteer-run, so give it a moment."
+            self._fetching = True
 
         def work():
-            self._fetching = True
             try:
                 from .fetch import run
                 run(self.cfg, force=True, log=lambda m: None, only=sat["norad"] if sat else None)
