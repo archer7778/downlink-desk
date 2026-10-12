@@ -271,7 +271,7 @@ pre.sum{margin:0;padding:12px 14px;font:12.5px/1.6 var(--f-mono);white-space:pre
 </head>
 <body>
 <div class="app">
-  <div class="livebar" id="livebar"><span><span class="pulse"></span><span id="liveText">Connecting to this Pi…</span></span><span>Volunteer-received data, decoded locally · not an official mission console · provisional limits</span></div>
+  <div class="livebar" id="livebar"><span><span class="pulse"></span><span id="liveText">Connecting…</span></span><span>Volunteer-received data, decoded locally · not an official mission console · provisional limits</span></div>
 
   <header class="top">
     <div class="brand"><span class="label">Downlink Desk</span>
@@ -313,8 +313,8 @@ pre.sum{margin:0;padding:12px 14px;font:12.5px/1.6 var(--f-mono);white-space:pre
         </div>
         <div class="panel">
           <div class="ph"><h2>Health model</h2><span class="sub" id="modelNote">Learns what normal looks like for every point in the orbit, then flags slow drifts that fixed limits miss</span></div>
-          <div class="dt"><table style="min-width:640px"><thead><tr><th>Channel</th><th>Status</th><th style="text-align:right">Latest vs normal</th><th style="text-align:right" id="modelRecentTh">Last 2 days</th><th style="text-align:right">Trend / week</th><th style="text-align:right">Samples</th></tr></thead><tbody id="modelBody"></tbody></table></div>
-          <div class="pb" id="modelHow"><p class="note">A small satellite warms in sunlight and cools in Earth’s shadow every orbit, so whether a reading is normal depends on where in that cycle it was taken. For each channel the Pi learns the typical value at each point of the cycle (minutes since the satellite last came out of shadow), corrects for longer or shorter shadows through the seasons, and compares the last two days with the three weeks before. The curve is a smooth fit around the orbit (a few harmonics, robust to odd frames). Evidence is counted by pass, not by frame, because frames from one pass aren’t independent. Every shift comes with a 90% range from resampling whole passes, and a drift is dated to when it most likely began. Because it learns only from data more than two days old, a new install shows “needs older data” until the Pi has filled in some history, which it does by itself a little at every fetch. Select a row for its orbit profile.</p></div>
+          <div class="dt"><table style="min-width:640px"><thead><tr><th>Channel</th><th>Status</th><th style="text-align:right" title="Latest reading minus the learned normal for that point in the orbit. σ is this channel’s typical scatter, so ±1σ is ordinary and beyond ±3σ is rare.">Latest vs normal</th><th style="text-align:right" id="modelRecentTh" title="Typical shift over recent passes, against the weeks before (hover a value for its 90% range)">Last 2 days</th><th style="text-align:right" title="Long-term slope of the difference from normal, per week">Trend / week</th><th style="text-align:right">Samples</th></tr></thead><tbody id="modelBody"></tbody></table></div>
+          <div class="pb" id="modelHow"><p class="note">A small satellite warms in sunlight and cools in Earth’s shadow every orbit, so whether a reading is normal depends on where in that cycle it was taken. For each channel it learns the typical value at each point of the cycle (minutes since the satellite last came out of shadow), corrects for longer or shorter shadows through the seasons, and compares the last two days with the three weeks before. The curve is a smooth fit around the orbit (a few harmonics, robust to odd frames). Evidence is counted by pass, not by frame, because frames from one pass aren’t independent. Every shift comes with a 90% range from resampling whole passes, and a drift is dated to when it most likely began. Because it learns only from data more than two days old, a new install shows “needs older data” until it has filled in some history, which it does by itself a little at every fetch. Select a row for its orbit profile.</p></div>
         </div>
         <div class="panel">
           <div class="ph"><h2>Restart forensics</h2><span class="sub">Last 30 days · when, where and in what conditions each subsystem restarted</span></div>
@@ -353,14 +353,14 @@ pre.sum{margin:0;padding:12px 14px;font:12.5px/1.6 var(--f-mono);white-space:pre
         </div>
         <div class="panel">
           <div class="ph"><h2>Live feed</h2><span class="sub"><span class="livedot" id="liveDot"></span><span id="liveNote">Connecting…</span></span></div>
-          <ul class="feed" id="feed"><li><span></span><span class="note">Frames appear here the moment the Pi stores them.</span></li></ul>
+          <ul class="feed" id="feed"><li><span></span><span class="note">Frames appear here the moment they’re stored.</span></li></ul>
         </div>
         <div class="panel">
           <div class="ph"><h2>Daily check</h2><span class="sub" id="procNote"></span></div>
           <div id="proc"></div>
         </div>
         <div class="panel">
-          <div class="ph"><h2>Ground segment</h2><span class="sub">Top two update themselves</span></div>
+          <div class="ph"><h2>Ground segment</h2><span class="sub">The first two are checked automatically; set the rest yourself</span></div>
           <div style="overflow-x:auto"><table class="equip"><tbody id="equip"></tbody></table></div>
         </div>
         <div class="panel">
@@ -378,7 +378,7 @@ pre.sum{margin:0;padding:12px 14px;font:12.5px/1.6 var(--f-mono);white-space:pre
 
   <section id="tab-frames" class="panel" hidden>
     <div class="ph"><h2>Frames from SatNOGS</h2><div class="row"><select class="txt" id="frameFilter" aria-label="Filter frames"><option value="">All frames</option></select><a class="btn" id="csvLink" href="/api/export/telemetry.csv">Download telemetry CSV</a></div></div>
-    <div class="pb"><p class="note">Raw frames uploaded by volunteer stations, decoded on this Pi with the community decoder. Select a row for every decoded field and the raw bytes. Unrecognised frames are ones the decoder couldn't parse, often digipeated traffic or noise.</p></div>
+    <div class="pb"><p class="note">Raw frames uploaded by volunteer stations, decoded here with the community decoder. Select a row for every decoded field and the raw bytes. Unrecognised frames are ones the decoder couldn't parse, often digipeated traffic or noise.</p></div>
     <div class="dt"><table><thead><tr><th>Time (UTC)</th><th>Heard by</th><th>Satellite</th><th>Type</th><th>Key values</th></tr></thead><tbody id="frameBody"></tbody></table></div>
     <div class="pb"><button class="btn" id="olderFrames">Load older frames</button></div>
   </section>
@@ -389,7 +389,7 @@ pre.sum{margin:0;padding:12px 14px;font:12.5px/1.6 var(--f-mono);white-space:pre
     <div class="panel">
       <div class="ph"><h2>Passes over your station</h2><span class="sub" id="passNote"></span></div>
       <div class="dt"><table><thead><tr><th>AOS (UTC)</th><th>LOS</th><th>Duration</th><th>Max elevation</th><th>Rises at (az)</th><th>Sets at (az)</th><th>Starts in</th></tr></thead><tbody id="passBody"></tbody></table></div>
-      <div class="pb"><p class="note">These are the times the satellite is above your horizon, worked out on the Pi from the latest orbit data. The telemetry above comes from volunteer stations anywhere in the world, so frames arrive at other times too. If you set up your own receiver, these are your listening windows.</p></div>
+      <div class="pb"><p class="note">These are the times the satellite is above your horizon, worked out from the latest orbit data. The telemetry above comes from volunteer stations anywhere in the world, so frames arrive at other times too. If you set up your own receiver, these are your listening windows.</p></div>
     </div>
     <div class="panel">
       <div class="ph"><h2>Stations that heard it</h2><span class="sub">Last 7 days</span></div>
@@ -401,13 +401,13 @@ pre.sum{margin:0;padding:12px 14px;font:12.5px/1.6 var(--f-mono);white-space:pre
     <div class="ph">
       <h2>Audit trail</h2>
       <div class="row">
-        <select class="txt" id="logFilter" aria-label="Filter by type"><option value="">All entries</option><option>OPERATOR</option><option>ALERT</option><option>DATA</option><option>EQUIP</option><option>CONFIG</option></select>
+        <select class="txt" id="logFilter" aria-label="Filter by type"><option value="!DATA">Actions and alerts</option><option value="">Everything (with data arrivals)</option><option>OPERATOR</option><option>ALERT</option><option>DATA</option><option>EQUIP</option><option>CONFIG</option></select>
         <button class="btn" id="verify">Verify chain</button>
         <a class="btn" href="/api/export/log.json">Download signed log</a>
       </div>
     </div>
     <div class="pb stack">
-      <p class="note">Every operator action is signed on the Pi: each entry stores a SHA-256 hash of its content and of the entry before it, so an edited or deleted entry shows up on verify. Alert events are worked out from the telemetry and can be reproduced at any time, so they aren't stored. Tamper-evident, not tamper-proof: someone with access to the Pi's files could rebuild the whole chain.</p>
+      <p class="note">Every operator action is signed by the server: each entry stores a SHA-256 hash of its content and of the entry before it, so an edited or deleted entry shows up on verify. Alert events are worked out from the telemetry and can be reproduced at any time, so they aren't stored. Tamper-evident, not tamper-proof: someone with access to the server’s files could rebuild the whole chain.</p>
       <span class="verify" id="verifyOut"></span>
     </div>
     <div class="dt logtbl"><table><thead><tr><th>Time (UTC)</th><th>Type</th><th>By</th><th>Entry</th><th>Signature</th></tr></thead><tbody id="logBody"></tbody></table></div>
@@ -435,7 +435,7 @@ pre.sum{margin:0;padding:12px 14px;font:12.5px/1.6 var(--f-mono);white-space:pre
     <div class="panel pb" style="padding:18px" id="bioPanel"></div>
     <div class="panel pb stack" style="padding:18px">
       <h2>What this is</h2>
-      <p>Downlink Desk is a lightweight operations console running on this Raspberry Pi. Every half hour or so it asks the SatNOGS database for new frames from <span class="satname">the satellite</span>, decodes them with the community decoder, and stores them here. The console checks the values against limits, notices when data stops arriving, keeps a signed log of who did what, and builds shift handovers.</p>
+      <p>Downlink Desk is a lightweight operations console running on this machine. Every half hour or so it asks the SatNOGS database for new frames from <span class="satname">the satellite</span>, decodes them with the community decoder, and stores them here. The console checks the values against limits, notices when data stops arriving, keeps a signed log of who did what, and builds shift handovers.</p>
       <p>It is not affiliated with the satellite's team and has no way to command the spacecraft. The limits are provisional values chosen for this console, not the mission's own. Do not rely on it for decisions about real hardware.</p>
     </div>
     <div class="panel pb stack" style="padding:18px">
@@ -478,10 +478,10 @@ const HOUR=3600000,DAY=86400000,MIN=60000;
 let toastT;function toast(m){const el=$('#toast');el.textContent=m;el.hidden=false;clearTimeout(toastT);toastT=setTimeout(()=>el.hidden=true,4000)}
 
 /* ---------- server API ---------- */
-/* Read-only demo: when the page is a published snapshot, read saved JSON files instead of a live Pi. */
+/* Read-only demo: when the page is a published snapshot, read saved JSON files instead of a live server. */
 const ST=window.DD_STATIC||null;
 async function staticApi(path,opts){
-  if(opts&&opts.method==='POST'){const e=new Error('This is a read-only demo. Run Downlink Desk on your own Pi to sign actions.');e.status=403;e.body={message:e.message};throw e}
+  if(opts&&opts.method==='POST'){const e=new Error('This is a read-only demo. Run Downlink Desk on your own machine to sign actions.');e.status=403;e.body={message:e.message};throw e}
   const [base,qs]=path.split('?'),q=new URLSearchParams(qs||''),n=base.replace(/^\/api\//,'');
   if(n==='telemetry'&&q.has('after_id'))return {channels:{},frames:[],max_id:0};
   if(n==='log'&&+(q.get('after')||0)>0)return [];
@@ -569,11 +569,11 @@ function derive(now){
       if(b)good(key,b,1)}}
   // fetcher health (current only)
   if(HEALTH&&!ST){
-    if(!HEALTH.token_present)alerts.push({id:'token@0',key:'token',sev:'crit',sev0:'crit',raised:HEALTH.server_started_ms,cleared:null,msg:'No SatNOGS API key on this Pi yet, so no data can be fetched',first:''});
-    else if(HEALTH.auth_error)alerts.push({id:'auth@'+(HEALTH.last_attempt_ms||0),key:'auth',sev:'crit',sev0:'crit',raised:HEALTH.last_attempt_ms||now,cleared:null,msg:'SatNOGS rejected the API key. Check secrets/satnogs_token on the Pi',first:''});
+    if(!HEALTH.token_present)alerts.push({id:'token@0',key:'token',sev:'crit',sev0:'crit',raised:HEALTH.server_started_ms,cleared:null,msg:'No SatNOGS API key on this server yet, so no data can be fetched',first:''});
+    else if(HEALTH.auth_error)alerts.push({id:'auth@'+(HEALTH.last_attempt_ms||0),key:'auth',sev:'crit',sev0:'crit',raised:HEALTH.last_attempt_ms||now,cleared:null,msg:'SatNOGS rejected the API key. Check secrets/satnogs_token on the server',first:''});
     const lim=3*CONF.poll_minutes*MIN,base=HEALTH.last_ok_ms||HEALTH.server_started_ms;
-    const SS=HEALTH.storage||{};if(SS.level&&SS.level!=='ok')alerts.push({id:'disk@'+fmtD(now),key:'disk',sev:SS.level,sev0:SS.level,raised:now,cleared:null,msg:`The Pi's SD card is ${SS.level==='crit'?'nearly full':'getting full'}: ${fmtB(SS.disk_free)} free of ${fmtB(SS.disk_total)}`,first:''});
-    if(HEALTH.token_present&&now-base>lim)alerts.push({id:'fetch@'+base,key:'fetch',sev:'crit',sev0:'crit',raised:base+lim,cleared:null,msg:HEALTH.last_ok_ms?`The Pi hasn't reached SatNOGS since ${fmtDT(HEALTH.last_ok_ms)}`:'The Pi has not completed a fetch from SatNOGS yet',first:''});
+    const SS=HEALTH.storage||{};if(SS.level&&SS.level!=='ok')alerts.push({id:'disk@'+fmtD(now),key:'disk',sev:SS.level,sev0:SS.level,raised:now,cleared:null,msg:`The server's disk is ${SS.level==='crit'?'nearly full':'getting full'}: ${fmtB(SS.disk_free)} free of ${fmtB(SS.disk_total)}`,first:''});
+    if(HEALTH.token_present&&now-base>lim)alerts.push({id:'fetch@'+base,key:'fetch',sev:'crit',sev0:'crit',raised:base+lim,cleared:null,msg:HEALTH.last_ok_ms?`The server hasn't reached SatNOGS since ${fmtDT(HEALTH.last_ok_ms)}`:'The server has not completed a fetch from SatNOGS yet',first:''});
   }
   // scheduled observations that delivered nothing, several in a row
   if(OBS&&OBS.silent_streak&&OBS.silent_streak.length>=OBS.silent_after){
@@ -604,7 +604,7 @@ function alertView(now){
 }
 
 /* ---------- actions (signed on the server) ---------- */
-function requireCs(){if(ST){toast('This is a read-only demo. Run Downlink Desk on your own Pi to sign actions.');return false}if(CS)return true;toast('Enter your call sign first. Every action is signed with it.');$('#cs').focus();return false}
+function requireCs(){if(ST){toast('This is a read-only demo. Run Downlink Desk on your own machine to sign actions.');return false}if(CS)return true;toast('Enter your call sign first. Every action is signed with it.');$('#cs').focus();return false}
 async function act(kind,data,msg){
   if(!requireCs())return false;
   try{const e=await api('/api/log',{method:'POST',body:{kind,data,msg,cs:CS}});LOG.push(e);buildCfg();refresh(true);return true}
@@ -612,10 +612,12 @@ async function act(kind,data,msg){
 }
 
 /* ---------- rendering ---------- */
-const ST_LABEL={ok:'Nominal',warn:'Caution',crit:'Alarm',stale:'Stale',nodata:'No data'};
-const ST_CLASS={ok:'ok',warn:'warn',crit:'crit',stale:'stale',nodata:'stale'};
+const ST_LABEL={ok:'Nominal',warn:'Caution',crit:'Alarm',stale:'Stale',nodata:'No data',nolim:'No limits'};
+const ST_CLASS={ok:'ok',warn:'warn',crit:'crit',stale:'stale',nodata:'stale',nolim:'none'};
 function latest(id){const s=SERIES[id];return s&&s.length?s[s.length-1]:null}
-function chState(c,now){const l=latest(c.id);if(!l)return {st:'nodata',v:null,at:null};const st=limStatus(limitsAt(c.id,now).lim,l[1]);const staleMs=(CONF.stale_hours||12)*HOUR*2;return {st:now-l[0]>staleMs&&st==='ok'?'stale':st,v:l[1],at:l[0]}}
+function chState(c,now){const l=latest(c.id);if(!l)return {st:'nodata',v:null,at:null};const lim=limitsAt(c.id,now).lim,st=limStatus(lim,l[1]);const staleMs=(CONF.stale_hours||12)*HOUR*2;
+  // a channel with no limits can't be called nominal: say so instead of implying it was checked
+  return {st:now-l[0]>staleMs&&st==='ok'?'stale':(!lim&&st==='ok'?'nolim':st),v:l[1],at:l[0]}}
 function sparkSVG(h,cls){
   if(h.length<2)return `<svg class="spark ${cls}" viewBox="0 0 120 26"></svg>`;
   let lo=Math.min(...h),hi=Math.max(...h);if(hi-lo<1e-9){lo-=1;hi+=1}
@@ -625,7 +627,7 @@ function sparkSVG(h,cls){
 function buildTlm(){
   let html='',sub='';
   for(const c of CH){if(c.sub!==sub){sub=c.sub;html+=`<tr class="sub"><td colspan="7">${esc(sub)}</td></tr>`}
-    html+=`<tr id="r-${esc(c.id)}" data-ch="${esc(c.id)}" tabindex="0" aria-label="${esc(c.name)}: open history and limits"><td class="nm">${esc(c.name)}</td><td class="val" data-f="v">—</td><td class="unit">${esc(c.unit)}</td><td data-f="sp"></td><td class="lim" data-f="lim"></td><td data-f="st"></td><td class="age" data-f="age"></td></tr>`}
+    html+=`<tr id="r-${esc(c.id)}" data-ch="${esc(c.id)}" tabindex="0" aria-label="${esc(c.name)}: open history and limits"><td class="nm"${c.note?` title="${esc(c.note)}"`:''}>${esc(c.name)}${c.note?' <span class="note" aria-hidden="true">ⓘ</span>':''}</td><td class="val" data-f="v">—</td><td class="unit">${esc(c.unit)}</td><td data-f="sp"></td><td class="lim" data-f="lim"></td><td data-f="st"></td><td class="age" data-f="age"></td></tr>`}
   $('#tlmBody').innerHTML=html||'<tr><td colspan="7" class="empty">No channels in the channels file.</td></tr>';
 }
 function renderTlm(now){
@@ -645,12 +647,12 @@ function nextObsChip(now){
 function renderStrip(now,AV){
   const lf=FRAMES.length?FRAMES[FRAMES.length-1]:null,ld=[...FRAMES].reverse().find(f=>f[4]);
   let worst='ok';for(const c of CH){const l=latest(c.id);if(!l)continue;const s=limStatus(limitsAt(c.id,now).lim,l[1]);if(s==='crit')worst='crit';else if(s==='warn'&&worst==='ok')worst='warn'}
-  const un=AV.open.filter(a=>!a.ack),np=nextPass(now);
+  const un=AV.open.filter(a=>!a.ack),np=nextPass(now),drifting=typeof MODEL!=='undefined'&&MODEL&&MODEL.channels?MODEL.channels.filter(c=>c.status==='drift').length:0;
   const fetchOk=HEALTH&&HEALTH.last_ok_ms,fetchCls=!HEALTH?'':(AV.open.some(a=>['fetch','auth','token'].includes(a.key))?'crit':'ok');
   const staleA=AV.open.concat(AV.shelved).find(a=>a.key===akey('stale')&&a.cleared==null);
   const chips=[
     {cls:staleA?staleA.sev:ld?'ok':'',l:'Latest data',v:ld?ago(now-ld[1])+' ago':'None yet',s:ld?`Heard by ${ld[2]||'unknown'} · ${fmtDT(ld[1])}`:'Waiting for the first fetch'},
-    {cls:ld?worst:'',l:'Spacecraft',v:ld?{ok:'Nominal',warn:'Caution',crit:'Alarm'}[worst]:'—',s:'Against this console’s limits'},
+    {cls:ld?(worst==='ok'&&drifting?'warn':worst):'',l:'Spacecraft',v:ld?{ok:'Nominal',warn:'Caution',crit:'Alarm'}[worst]:'—',s:worst==='ok'&&drifting?`Within limits, but ${drifting} channel${drifting>1?'s':''} drifting from normal`:'Against this console’s limits'},
     {cls:un.some(a=>a.sev==='crit')?'crit':un.length?'warn':'ok',l:'Alerts',v:`${AV.open.length} open`,s:un.length?`${un.length} need acknowledgement`:(AV.shelved.length?`${AV.shelved.length} shelved`:'All acknowledged')},
     {cls:fetchCls,l:'SatNOGS fetch',v:fetchOk?ago(now-HEALTH.last_ok_ms)+' ago':'Not yet',s:HEALTH?(HEALTH.fetching?'Fetching now…':`Every ${CONF.poll_minutes} min · ${HEALTH.frames_total} frames stored`):''},
     nextObsChip(now),
@@ -685,7 +687,7 @@ function renderProc(now){
 let eqPending=null;
 const fmtB=b=>b>=1e9?(b/1e9).toFixed(b>=1e10?0:1)+' GB':b>=1e6?(b/1e6).toFixed(1)+' MB':Math.max(1,Math.round(b/1e3))+' kB';
 function sdText(st){if(!st)return '';const parts=[];
-  if(st.disk_total)parts.push(`SD card ${Math.round((1-st.disk_free/st.disk_total)*100)}% used (${fmtB(st.disk_free)} free of ${fmtB(st.disk_total)})`);
+  if(st.disk_total)parts.push(`Disk ${Math.round((1-st.disk_free/st.disk_total)*100)}% used (${fmtB(st.disk_free)} free of ${fmtB(st.disk_total)})`);
   parts.push('database '+fmtB(st.db_bytes||0));
   if(st.days_to_full)parts.push(st.days_to_full>3650?'room for 10+ years':`room for about ${st.days_to_full>730?Math.round(st.days_to_full/365)+' years':st.days_to_full+' days'}`);
   return parts.join(' · ')}
@@ -694,12 +696,12 @@ function renderEquip(now){SDL=HEALTH&&HEALTH.storage&&HEALTH.storage.level||'ok'
   const H=HEALTH;const fails=H?H.fetches.slice(0,3).filter(f=>!f.ok).length:0;
   const link=!H?['stale','Unknown','']:H.auth_error?['crit','Key rejected','SatNOGS refused the API key']:!H.token_present?['crit','No API key','Add it to secrets/satnogs_token']:(AV_cache.open.some(a=>a.key==='fetch'))?['crit','Down',H.fetches[0]?H.fetches[0].message:'']:fails?['warn','Degraded',H.fetches[0].message]:['ok','Operational',H.fetches[0]?H.fetches[0].message:'No fetches yet'];
   const auto=[
-    ST?{name:'Demo snapshot',st:['ok','Published'],note:`Built by GitHub Actions ${ago(now-ST.snapshot)} ago with the same code a Pi runs`}:{name:'Raspberry Pi server',st:!online?['crit','Unreachable']:SDL==='crit'?['crit','Disk full']:SDL==='warn'?['warn','Low space']:['ok','Operational'],note:H?`Up ${ago(now-H.server_started_ms)} · ${sdText(H.storage)}`:''},
+    ST?{name:'Demo snapshot',st:['ok','Published'],note:`Built by GitHub Actions ${ago(now-ST.snapshot)} ago with the same code`}:{name:'Server',st:!online?['crit','Unreachable']:SDL==='crit'?['crit','Disk full']:SDL==='warn'?['warn','Low space']:['ok','Operational'],note:H?`Up ${ago(now-H.server_started_ms)} · ${sdText(H.storage)}`:''},
     {name:'SatNOGS link',st:[link[0],link[1]],note:link[2]}];
   let html=auto.map(a=>`<tr><td style="width:1%"><span class="dot ${a.st[0]}"></span></td><td><div class="nm">${esc(a.name)}</div><div class="nt">${esc(a.note)}</div></td><td style="text-align:right"><span class="pill ${a.st[0]}">${esc(a.st[1])}</span></td></tr>`).join('');
   html+=MANUAL_EQ.map(e=>{const s=eqAt(e.id),pend=eqPending&&eqPending.id===e.id;
     return `<tr><td style="width:1%"><span class="dot ${EQ_CLASS[s.status]}"></span></td><td><div class="nm">${esc(e.name)}</div><div class="nt">${esc(s.note||e.detail)}${s.cs?` · ${esc(s.cs)} ${fmtHM(s.t)}`:''}</div></td><td style="text-align:right"><select data-eq="${e.id}" id="eq-${e.id}" aria-label="${esc(e.name)} status">${EQ_STATES.map(x=>`<option${x===(pend?eqPending.status:s.status)?' selected':''}>${x}</option>`).join('')}</select></td></tr>`+
-    (pend?`<tr class="pend"><td></td><td colspan="2"><form class="row" data-eqform="${e.id}"><input class="txt" id="eqNote" style="flex:1 1 12em" maxlength="160" placeholder="Note, e.g. RTL-SDR v4 on the Pi" aria-label="Note"><button class="btn sm primary" type="submit">Save</button><button class="btn sm" type="button" data-eqcancel>Cancel</button></form></td></tr>`:'')}).join('');
+    (pend?`<tr class="pend"><td></td><td colspan="2"><form class="row" data-eqform="${e.id}"><input class="txt" id="eqNote" style="flex:1 1 12em" maxlength="160" placeholder="Note, e.g. RTL-SDR v4 on the server" aria-label="Note"><button class="btn sm primary" type="submit">Save</button><button class="btn sm" type="button" data-eqcancel>Cancel</button></form></td></tr>`:'')}).join('');
   const box=$('#equip');if(box.dataset.sig!==html){const focus=document.activeElement&&document.activeElement.id==='eqNote'?$('#eqNote').value:null;box.innerHTML=html;box.dataset.sig=html;if(focus!=null&&$('#eqNote')){$('#eqNote').value=focus;$('#eqNote').focus()}}
 }
 const TYPE_COLORS=['--t1','--t2','--t3','--t4','--t5'];
@@ -722,18 +724,18 @@ let lastRecentSig='';
 function renderRecent(now){const all=mergedLog(now);const sig=all.length+':'+(all.length?all[all.length-1].t:0);if(sig===lastRecentSig)return;lastRecentSig=sig;
   $('#recent').innerHTML=all.slice(-8).reverse().map(e=>`<li><span class="mono">${fmtHM(e.t)}</span><span class="tag ${e.type}">${e.type}</span><span>${e.by!=='system'?`<b>${esc(e.by)}</b> `:''}${esc(e.msg)}</span></li>`).join('');
   $('#logCount').textContent=' '+LOG.length;if(tab==='log')renderLog()}
-function renderLog(){const f=$('#logFilter').value,rows=mergedLog(Date.now()).filter(e=>!f||e.type===f).slice(-800).reverse();
+function renderLog(){const f=$('#logFilter').value,rows=mergedLog(Date.now()).filter(e=>!f||(f[0]==='!'?e.type!==f.slice(1):e.type===f)).slice(-800).reverse();
   $('#logBody').innerHTML=rows.map(r=>`<tr><td class="mono">${fmtDT(r.t)}</td><td><span class="tag ${r.type}">${r.type}</span></td><td class="mono">${esc(r.by)}</td><td class="msg">${esc(r.msg)}</td><td class="mono" ${r.e?`title="#${r.e.seq} ${esc(r.e.hash)}"`:''}>${r.e?'#'+r.e.seq+' '+esc(r.e.hash.slice(0,10)):'<span class="note">derived</span>'}</td></tr>`).join('')||'<tr><td colspan="5" class="empty">No entries match.</td></tr>'}
 function renderContext(now){
   const parts=[`<span>On duty: <b>${CFG.duty?esc(CFG.duty.cs):'nobody signed on'}</b>${CFG.duty?' since '+fmtDT(CFG.duty.t):''}</span>`];
   if(NOW&&NOW.lat!=null){const ch=NOW.next_change_ms;parts.push(`<span>${esc(CONF.satellite.name)} now: <b>${Math.abs(NOW.lat).toFixed(1)}°${NOW.lat>=0?'N':'S'} ${Math.abs(NOW.lon).toFixed(1)}°${NOW.lon>=0?'E':'W'}</b>, ${Math.round(NOW.alt_km)} km up, <b>${NOW.sunlit?'in sunlight':'in eclipse'}</b>${NOW.saa?', <b>over the South Atlantic Anomaly</b>':''}${ch&&ch>now?` · ${NOW.sunlit?'eclipse':'sunrise'} in ${Math.max(1,Math.round((ch-now)/MIN))} min`:''}</span>`)}
   if(HEALTH){const next=HEALTH.last_attempt_ms?HEALTH.last_attempt_ms+CONF.poll_minutes*MIN:null;parts.push(`<span>Last fetch ${HEALTH.last_attempt_ms?ago(now-HEALTH.last_attempt_ms)+' ago':'never'}${next&&next>now?` · next in about ${Math.ceil((next-now)/MIN)} min`:''}</span>`,(ST?'':`<button class="btn sm" id="fetchNow" ${HEALTH.fetching?'disabled':''}>${HEALTH.fetching?'Fetching…':'Fetch now'}</button>`))}
   $('#context').innerHTML=parts.join('');
-  const lb=$('#livebar');lb.classList.toggle('down',!online);$('#liveText').textContent=ST?`Live demo · real ${CONF.satellite.name} data from SatNOGS · snapshot ${ago(now-ST.snapshot)} old, refreshed every ${ST.refresh_hours} h`:online?`Live · ${CONF.satellite.name} via SatNOGS`:'Lost contact with the Pi · retrying';
+  const lb=$('#livebar');lb.classList.toggle('down',!online);$('#liveText').textContent=ST?`Live demo · real ${CONF.satellite.name} data from SatNOGS · snapshot ${ago(now-ST.snapshot)} old, refreshed every ${ST.refresh_hours} h`:online?`Live · ${CONF.satellite.name} via SatNOGS`:'Lost contact with the server · retrying';
   const sb=$('#setupBanner');
-  if(HEALTH&&!HEALTH.token_present&&!ST){sb.hidden=false;sb.className='banner crit';sb.innerHTML='<b>One step left:</b> put your SatNOGS DB API key in <code>secrets/satnogs_token</code> on the Pi, then press Fetch now. Get the key at db.satnogs.org → your avatar → Settings / API Token.'}
+  if(HEALTH&&!HEALTH.token_present&&!ST){sb.hidden=false;sb.className='banner crit';sb.innerHTML='<b>One step left:</b> put your SatNOGS DB API key in <code>secrets/satnogs_token</code> on the server, then press Fetch now. Get the key at db.satnogs.org → your avatar → Settings / API Token.'}
   else if(PASSES&&PASSES.note&&/latitude/.test(PASSES.note)){sb.hidden=false;sb.className='banner warn';sb.textContent='Set your station latitude and longitude in config.toml and restart the server to see passes over you.'}
-  else if(ST){if(!sb.dataset.demo){sb.dataset.demo=1;sb.hidden=false;sb.className='banner';sb.innerHTML=`<span><b>You’re looking at a live demo.</b> This is the real Downlink Desk console, showing real telemetry from the CubeSat ${esc(CONF.satellite.name)} received by volunteer SatNOGS stations. A snapshot is rebuilt every ${ST.refresh_hours} hours; on a $15 Raspberry Pi at home it updates every 30 minutes and frames stream in live. Buttons that change things are off here.</span><span class="row"><a class="btn sm primary" href="${ST.repo}">Get it on GitHub</a><a class="btn sm" href="training">Try the simulator</a></span>`}}
+  else if(ST){if(!sb.dataset.demo){sb.dataset.demo=1;sb.hidden=false;sb.className='banner';sb.innerHTML=`<span><b>You’re looking at a live demo.</b> This is the real Downlink Desk console, showing real telemetry from the CubeSat ${esc(CONF.satellite.name)} received by volunteer SatNOGS stations. A snapshot is rebuilt every ${ST.refresh_hours} hours; on your own machine (even a $15 Raspberry Pi) it updates every 30 minutes and frames stream in live. Buttons that change things are off here.</span><span class="row"><a class="btn sm primary" href="${ST.repo}">Get it on GitHub</a><a class="btn sm" href="training">Try the simulator</a></span>`}}
   else sb.hidden=true;
 }
 
@@ -761,7 +763,7 @@ function renderCatalog(){
   if(feat.length)h+=`<div class="stack" style="gap:8px"><span class="label">Featured · work well with this console</span><div class="cards">${feat.map(e=>`<div class="card"><h3>${esc(e.name)}</h3>
     <div class="facts">${esc([e.size,e.builder,e.country].filter(Boolean).join(' · '))}<br>Launched ${esc(e.launched||'—')} · NORAD ${e.norad}</div>
     <p>${esc(e.bio||'')}</p><div class="row">${btn(e)}${safeUrl(e.website)?`<a href="${esc(safeUrl(e.website))}" target="_blank" rel="noopener">Team site</a>`:''}${sat(e)}</div></div>`).join('')}</div></div>`;
-  h+=`<div class="stack" style="gap:8px"><span class="label">Everything else in orbit that this Pi can decode (${rest.length})</span>`+
+  h+=`<div class="stack" style="gap:8px"><span class="label">Everything else in orbit that this console can decode (${rest.length})</span>`+
     (rest.length?`<div class="dt"><table style="min-width:560px"><thead><tr><th>Satellite</th><th>Country</th><th>Launched</th><th>Decoder</th><th></th></tr></thead><tbody>${rest.slice(0,300).map(e=>`<tr><td><b>${esc(e.name)}</b>${e.names?`<div class="note">${esc(e.names)}</div>`:''}</td><td>${esc(e.countries||'—')}</td><td class="mono">${esc(e.launched||'—')}</td><td class="mono">${esc(e.decoder)}</td><td style="text-align:right;white-space:nowrap">${btn(e)} ${sat(e)}</td></tr>`).join('')}</tbody></table></div>`
       :`<p class="note">${CATALOG.some(e=>!e.featured)?'No matches.':'The full list downloads from SatNOGS with the next fetch (once a day).'}</p>`)+
     '<p class="note">Satellites without a featured profile use automatic channels: every numeric field the community decoder produces, in raw units, with no limits until you set them.</p></div>';
@@ -805,13 +807,15 @@ async function loadFrames(older){
   const before=older&&frameRows.length?frameRows[frameRows.length-1].t:Date.now()+HOUR;
   try{const rows=await api('/api/frames?limit=100&before='+before);frameRows=older?frameRows.concat(rows):rows;$('#olderFrames').hidden=rows.length<100;renderFrames()}catch(e){}
 }
+const latlon=(la,lo)=>`${Math.abs(la).toFixed(0)}°${la>=0?'N':'S'} ${Math.abs(lo).toFixed(0)}°${lo>=0?'E':'W'}`;
+const TX_NAME={scale:c=>`× ${c.scale??1}${c.offset?` ${c.offset>0?'+':'−'} ${Math.abs(c.offset)}`:''}`,mv_auto:()=>'mV → V',ma_auto:()=>'as sent',kelvin_auto:()=>'K → °C',s_to_h:()=>'seconds → hours'};
 function txf(c,x){switch(c.transform){case 'scale':return x*(c.scale??1)+(c.offset??0);case 'mv_auto':return Math.abs(x)>100?x/1000:x;case 'kelvin_auto':return (x>1000?x/10:x)-273.15;case 's_to_h':return x/3600;default:return x}}
 function keyVals(f){return CH.map(c=>{for(const fld of (c.fields||[c.field]))if(typeof f.fields[fld]==='number')return {c,v:fv(c,txf(c,f.fields[fld]))};return null}).filter(Boolean).slice(0,4)}
 function renderFrames(){
   const types=[...new Set(frameRows.map(f=>f.type))],sel=$('#frameFilter'),cur=sel.value;
   sel.innerHTML='<option value="">All frames</option>'+types.map(t=>`<option${t===cur?' selected':''}>${esc(t)}</option>`).join('');
   const rows=frameRows.filter(f=>!cur||f.type===cur);
-  $('#frameBody').innerHTML=rows.map(f=>`<tr class="fr" data-frame="${f.id}"><td class="mono">${fmtDT(f.t)}</td><td>${esc(f.observer||'—')}</td><td class="mono" style="white-space:nowrap">${f.sunlit==null?'—':(f.sunlit?'Sunlit':'Eclipse')}${f.phase!=null?` · ${Math.round(f.phase)} min after sunrise`:''}${f.sub_lat!=null?` · ${f.sub_lat.toFixed(0)}°, ${f.sub_lon.toFixed(0)}°`:''}${f.saa?'<span class="badge" title="Over the South Atlantic Anomaly, where radiation is highest">SAA</span>':''}</td><td><span class="pill ${f.ok?'acc':''}">${esc(f.type)}</span></td><td class="mono" style="white-space:normal">${keyVals(f).map(k=>`${esc(k.c.name)} <b>${esc(k.v)}</b>`).join(' · ')||'<span class="note">—</span>'}</td></tr>`+
+  $('#frameBody').innerHTML=rows.map(f=>`<tr class="fr" data-frame="${f.id}"><td class="mono">${fmtDT(f.t)}</td><td>${esc(f.observer||'—')}</td><td class="mono" style="white-space:nowrap">${f.sunlit==null?'—':(f.sunlit?'Sunlit':'Eclipse')}${f.phase!=null?` · ${Math.round(f.phase)} min after sunrise`:''}${f.sub_lat!=null?` · ${latlon(f.sub_lat,f.sub_lon)}`:''}${f.saa?'<span class="badge" title="Over the South Atlantic Anomaly, where radiation is highest">SAA</span>':''}</td><td><span class="pill ${f.ok?'acc':''}">${esc(f.type)}</span></td><td class="mono" style="white-space:normal">${keyVals(f).map(k=>`${esc(k.c.name)} <b>${esc(k.v)}</b>`).join(' · ')||'<span class="note">—</span>'}</td></tr>`+
     (openFrame===f.id?`<tr><td colspan="5"><div class="fields">${Object.entries(f.fields).map(([k,v])=>`<div><span>${esc(k)}</span> ${esc(v)}</div>`).join('')||'<div><span>No decoded fields</span></div>'}</div><div class="hex">${esc(f.hex)}</div></td></tr>`:'')).join('')||'<tr><td colspan="5" class="empty">No frames stored yet.</td></tr>';
 }
 
@@ -896,7 +900,7 @@ function handoverText(now,AV){
     const nx=OBS.observations.filter(o=>o.end>now).sort((a,b)=>a.start-b.start)[0];if(nx)P(`  Next expected data: ${fmtDT(nx.start)} from ${nx.station} (max ${Math.round(nx.max_alt)}°)`)}
   if(HEALTH)P(`  Fetcher: last success ${HEALTH.last_ok_ms?fmtDT(HEALTH.last_ok_ms):'never'}${HEALTH.fetches[0]&&!HEALTH.fetches[0].ok?' · last attempt failed: '+HEALTH.fetches[0].message:''}`);
   P('');P('SPACECRAFT (latest values)');
-  CH.forEach(c=>{const s=chState(c,now);if(s.v!=null)P(`  ${c.name.padEnd(34)} ${(+s.v).toFixed(c.dp)} ${c.unit}  (${ago(now-s.at)} old)${s.st!=='ok'?'  ['+ST_LABEL[s.st].toUpperCase()+']':''}`)});
+  CH.forEach(c=>{const s=chState(c,now);if(s.v!=null)P(`  ${c.name.padEnd(34)} ${(+s.v).toFixed(c.dp)} ${c.unit}  (${ago(now-s.at)} old)${!['ok','nolim'].includes(s.st)?'  ['+ST_LABEL[s.st].toUpperCase()+']':''}`)});
   if(!flagged.length)P('  Nothing off-nominal against this console’s limits.');
   P('');P(`OPEN ALERTS (${AV.open.length})`);if(!AV.open.length)P('  None.');
   AV.open.forEach(a=>P(`  - [${a.event?'EVENT':a.sev==='crit'?'ALARM':'CAUTION'}] ${a.msg} · raised ${fmtDT(a.raised)} · ${a.ack?'acked '+a.ack.cs:'NOT ACKNOWLEDGED'}`));
@@ -916,7 +920,7 @@ function renderAbout(){
   const s=CONF.satellite,sat=(HEALTH&&HEALTH.satellite)||{};$$('.satname').forEach(e=>e.textContent=s.name);
   $('#satCredit').innerHTML=safeUrl(sat.website)?`${esc(s.name)} is operated by its own team; see <a href="${esc(safeUrl(sat.website))}" target="_blank" rel="noopener">${esc(sat.website)}</a>.`:'';
   $('#specNote').textContent=CONF.spec.notes||'';
-  $('#specBody').innerHTML=CH.map(c=>`<tr><td>${esc(c.name)}</td><td class="mono">${esc((c.fields||[c.field]).join(', '))}</td><td class="mono">${esc(c.transform||'none')}</td><td class="mono">${esc(c.unit)}</td><td class="mono">${limTxt(c.lim)}</td></tr>`).join('');
+  $('#specBody').innerHTML=CH.map(c=>`<tr><td>${esc(c.name)}</td><td class="mono">${esc((c.fields||[c.field]).join(', '))}</td><td class="mono">${esc(TX_NAME[c.transform]?TX_NAME[c.transform](c):'as sent')}</td><td class="mono">${esc(c.unit)}</td><td class="mono">${limTxt(c.lim)}</td></tr>`).join('');
   $('#sysKv').innerHTML=[['Satellite',`${s.name} · NORAD ${s.norad} · decoder ${s.decoder}`],['SatNOGS status',sat.status||'—'],['Station',`${CONF.station.name} (${CONF.station.lat}, ${CONF.station.lon})`],['Fetch interval',CONF.poll_minutes+' min'],['Phone alerts',CONF.phone_alerts?'On (ntfy)':'Off. Set ntfy_topic in config.toml to get alarms on your phone'],['Downlink Desk',CONF.version+(HEALTH&&HEALTH.update?` · ${HEALTH.update.message} (checked ${ago(Date.now()-HEALTH.update.t_ms)} ago)`:'')+(HEALTH?(HEALTH.auto_update?' · updates itself after boot and nightly':' · automatic updates off'):'')],['Storage',HEALTH?sdText(HEALTH.storage):'—'],['Commissioned',CONF.commissioned_ms?fmtDT(CONF.commissioned_ms):'—']].map(([k,v])=>`<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('');
 }
 
@@ -933,14 +937,14 @@ let lastModelSig='';
 function renderModel(){
   if(!MODEL){$('#modelBody').innerHTML='<tr><td colspan="6" class="empty">Loading the model…</td></tr>';return}
   const sig=JSON.stringify(MODEL.channels.map(c=>[c.id,c.status,c.shift,c.n_base,c.n_recent]));if(sig===lastModelSig)return;lastModelSig=sig;
-  $('#modelRecentTh').textContent=`Last ${MODEL.recent_days} days`;
+  $('#modelRecentTh').textContent=`Shift, last ${MODEL.recent_days} days`;
   const rows=[...MODEL.channels].sort((a,b)=>(M_ORDER[a.status]-M_ORDER[b.status])||(Math.abs(b.z||0)-Math.abs(a.z||0)));
   $('#modelBody').innerHTML=rows.map(c=>{const [cls,lab]=M_ST[c.status]||['',c.status];const u=c.unit?' '+c.unit:'';const dp=Math.min(c.dp,2);
     const lt=c.latest?`${sgn(c.latest.value-c.latest.expected,dp)}${u} <span class="note">(${sgn(c.latest.sigmas,1)}σ)</span>`:'—';
     const sh=c.shift!=null?`<span title="${c.shift_range?`90% range ${sgn(c.shift_range[0],dp)} to ${sgn(c.shift_range[1],dp)}${u}, from ${c.n_recent_passes} passes`:''}">${sgn(c.shift,dp)}${u} <span class="note">(${sgn(c.z,1)}σ)</span></span>`:(c.status==='quiet'?'<span class="note">too few recent passes</span>':'—');
     const tr=c.trend_per_week!=null?sgn(c.trend_per_week,dp)+u:'—';
-    const lb=c.status==='learning'?(c.n_base===0?'Learning · needs older data':`Learning · ${c.need} more`):c.change?`${lab} · since ${fmtDT(c.change.began).slice(0,11)}`:lab;
-    return `<tr class="mrow" data-mch="${esc(c.id)}"><td>${esc(c.name)}${c.n_unusual?`<span class="badge" title="Readings far from the model, beyond any drift">${c.n_unusual} odd</span>`:''}</td><td><span class="pill ${cls}">${esc(lb)}</span></td><td class="num">${lt}</td><td class="num">${sh}</td><td class="num">${tr}</td><td class="num">${c.n_base+c.n_recent}</td></tr>`}).join('')||'<tr><td colspan="6" class="empty">No channels suitable for a model.</td></tr>';
+    const lb=c.status==='learning'?(c.n_base===0?'Learning · needs older data':`Learning · ${c.need} more samples`):c.change?`${lab} · since ${fmtDT(c.change.began).slice(0,11)}`:lab;
+    return `<tr class="mrow" data-mch="${esc(c.id)}"><td>${esc(c.name)}${c.n_unusual?`<span class="badge" title="Readings far from the model (over 5σ), beyond any drift">${c.n_unusual} unusual</span>`:''}</td><td><span class="pill ${cls}">${esc(lb)}</span></td><td class="num">${lt}</td><td class="num">${sh}</td><td class="num">${tr}</td><td class="num">${c.n_base+c.n_recent}</td></tr>`}).join('')||'<tr><td colspan="6" class="empty">No channels suitable for a model.</td></tr>';
   const judged=MODEL.channels.filter(c=>!['learning','quiet'].includes(c.status));
   $('#modelNote').textContent=`Orbit ${MODEL.period_min.toFixed(1)} min`+(MODEL.shadow_min_now!=null?` · in shadow ${MODEL.shadow_min_now} min of it now`:'')+` · ${judged.length} of ${MODEL.channels.length} channels judged`;
 }
@@ -987,15 +991,15 @@ function renderFeed(){
     if(f.kind==='frame')return `<li${cls}><span class="mono">${fmtT(f.at)}</span><span><b>${f.n} frame${f.n>1?'s':''}</b> of ${esc(f.sat)} from ${esc(f.observer||'a station')}${f.saa?'<span class="badge" title="Received while the satellite was over the South Atlantic Anomaly">SAA</span>':''}</span><span class="d">${f.ok} decoded · heard ${f.t0===f.t1?fmtHM(f.t0):fmtHM(f.t0)+'–'+fmtHM(f.t1)} (${ago(f.at-f.t1)} before it reached this Pi)</span></li>`;
     if(f.kind==='history')return `<li${cls}><span class="mono">${fmtT(f.at)}</span><span class="note">Filling in history: ${f.n.toLocaleString()} older frames added, back to ${fmtDT(f.oldest)}</span></li>`;
     if(f.kind==='fetch')return `<li${cls}><span class="mono">${fmtT(f.at)}</span><span>${f.ok?'':'<b>Fetch failed:</b> '}${esc(f.msg)}</span></li>`;
-    return `<li${cls}><span class="mono">${fmtT(f.at)}</span><span class="note">${esc(f.msg)}</span></li>`}).join(''):'<li><span></span><span class="note">Frames appear here the moment the Pi stores them.</span></li>';
+    return `<li${cls}><span class="mono">${fmtT(f.at)}</span><span class="note">${esc(f.msg)}</span></li>`}).join(''):'<li><span></span><span class="note">Frames appear here the moment they’re stored.</span></li>';
 }
 function setLive(on,msg){streamOn=on;$('#liveDot').className='livedot'+(on?' on':'');$('#liveNote').textContent=msg}
 let afterFramesT=null,liveNew=0;
 function connectStream(){
-  if(ST){setLive(false,`Snapshot from ${fmtDT(ST.snapshot)}; on a real Pi frames stream in here live`);return}
+  if(ST){setLive(false,`Snapshot from ${fmtDT(ST.snapshot)}; on your own install frames stream in here live`);return}
   if(!window.EventSource){setLive(false,'Not supported in this browser');return}
   ES=new EventSource('/api/stream');
-  ES.addEventListener('hello',()=>setLive(true,'Live · frames appear as the Pi stores them'));
+  ES.addEventListener('hello',()=>setLive(true,'Live · frames appear as they’re stored'));
   ES.addEventListener('frame',e=>{const d=JSON.parse(e.data);
     feedPush({kind:'frame',at:Date.now(),sat:d.sat,norad:d.norad,observer:d.observer,n:1,ok:d.ok?1:0,t0:d.t,t1:d.t,saa:d.saa,fresh:true});
     if(d.norad===SAT)liveNew++;});
@@ -1007,7 +1011,7 @@ function connectStream(){
     if(top){top.n+=d.n;top.oldest=Math.min(top.oldest,d.oldest);top.at=Date.now();top.fresh=true;clearTimeout(feedT);feedT=setTimeout(renderFeed,250)}
     else feedPush({kind:'history',at:Date.now(),n:d.n,oldest:d.oldest,fresh:true})});
   ES.addEventListener('fetch',e=>{const d=JSON.parse(e.data);feedPush({kind:'fetch',at:d.t,ok:d.ok,msg:d.message,fresh:true});poll('health')});
-  ES.addEventListener('fetching',()=>feedPush({kind:'info',at:Date.now(),msg:'The Pi is asking SatNOGS for new frames…',fresh:true}));
+  ES.addEventListener('fetching',()=>feedPush({kind:'info',at:Date.now(),msg:'Asking SatNOGS for new frames…',fresh:true}));
   ES.onerror=()=>setLive(false,'Reconnecting…');
 }
 function seedFeed(){if(FEED.length||!HEALTH)return;for(const f of HEALTH.fetches.slice(0,6).reverse())FEED.unshift({kind:'fetch',at:f.t_ms,ok:!!f.ok,msg:f.message||''});renderFeed()}
@@ -1026,7 +1030,7 @@ function renderSW(now){
     <div><span class="label">Solar X-rays now</span><span class="v">${esc(SW.xray.class||'—')}</span><span class="s">GOES, A·B·C·M·X scale</span></div>
     <div><span class="label">Biggest flare, 24 h</span><span class="v">${esc(SW.xray_peak_24h.class||'—')}</span><span class="s">${SW.xray_peak_24h.t?fmtDT(SW.xray_peak_24h.t):''}</span></div>
   </div><div class="pb" style="padding-top:6px"><svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block" role="img" aria-label="Kp index over 7 days"><line x1="0" x2="${W}" y1="${y5.toFixed(1)}" y2="${y5.toFixed(1)}" stroke="var(--crit)" stroke-dasharray="3 3" stroke-opacity=".5"/>${bars}</svg>
-  <p class="note">Kp, last 7 days; above the dashed line is a geomagnetic storm. Storms heat the upper atmosphere (more drag) and bring more energetic particles. Storm periods are also marked on each channel’s 7-day chart.${SW.f107.value!=null?` Solar flux ${SW.f107.value.toFixed(0)} sfu.`:''}</p></div>`;
+  <p class="note">Kp, last 7 days; above the dashed line is a geomagnetic storm. Storms heat the upper atmosphere (more drag) and bring more energetic particles. Storm periods are also marked on each channel’s 7-day chart.${SW.f107.value!=null?` Solar flux (10.7 cm) ${SW.f107.value.toFixed(0)}, a measure of overall solar activity: about 70 at solar minimum, 150–250 near maximum.`:''}</p></div>`;
   $('#swNote').textContent='NOAA SWPC'+(SW.refreshed_ms?` · checked ${ago(now-SW.refreshed_ms)} ago`:'');
 }
 
@@ -1035,7 +1039,7 @@ function renderSummary(){
   if(!SUM)return;$('#sumText').textContent=SUM.text||'Nothing to report yet.';
   const h=pad(SUM.hour)+':00';
   $('#sumNote').textContent=SUM.phone?(SUM.hour<0?'Daily push is off (summary_hour = -1).':`Pushed to your phone every day at ${h} (${SUM.timezone})${SUM.sent_day?', last sent '+SUM.sent_day:''}. Includes every tracked satellite.`)
-    :ST?'On a Pi this arrives on your phone every morning through the free ntfy app.':'Set ntfy_topic in config.toml to get this on your phone every morning.';
+    :ST?'On your own install this arrives on your phone every morning through the free ntfy app.':'Set ntfy_topic in config.toml to get this on your phone every morning.';
   $('#sumSend').hidden=!SUM.phone;
 }
 
@@ -1068,7 +1072,7 @@ function renderBattery(){
     ${L?`<div class="stack" style="gap:4px;min-width:min(320px,100%)"><span class="label">Estimated capacity left (model)</span><div style="position:relative;height:14px;background:var(--sunk);border-radius:7px;overflow:hidden"><div style="position:absolute;left:${(L.capacity_range[0]*100).toFixed(1)}%;width:${((L.capacity_range[1]-L.capacity_range[0])*100).toFixed(1)}%;top:0;bottom:0;background:var(--accent);opacity:.3"></div><div style="position:absolute;left:0;width:${(L.capacity_now*100).toFixed(1)}%;top:5px;height:4px;background:var(--accent)"></div><div style="position:absolute;left:${(BAT.life_params.eol_capacity*100).toFixed(0)}%;top:0;bottom:0;width:2px;background:var(--crit)" title="End of life"></div></div><span class="note">≈${(L.capacity_now*100).toFixed(0)}% (range ${(L.capacity_range[0]*100).toFixed(0)}–${(L.capacity_range[1]*100).toFixed(0)}%) · red line is end of life at ${(BAT.life_params.eol_capacity*100).toFixed(0)}% · ${L.years_left_range[0]}–${L.years_left_range[1]} years to go</span></div>`:''}</div>
     ${BAT.grade==='learning'?`<p class="note">Needs ${BAT.need} more frames with a known orbit position before it can judge anything. That usually takes a day or two.</p>`:''}
     <p class="note">Measured checks come straight from the satellite’s own telemetry. The life estimate is a model built on assumed battery data (below), so read it as a rough guide, not a measurement.</p></div>`;
-  if(BAT.profile)h+=`<div class="panel"><div class="ph"><h2>Charge around one orbit</h2><span class="sub">${BAT.balance_mah!=null?`Net ${BAT.balance_mah>=0?'+':''}${BAT.balance_mah} mAh per orbit`:''}${BAT.eclipse_mah!=null?` · ${BAT.eclipse_mah} mAh used per eclipse`:''} · ${Math.round((BAT.coverage||0)*100)}% of the orbit covered</span></div><div class="chartbox">${batChart(BAT)}</div>
+  if(BAT.profile)h+=`<div class="panel"><div class="ph"><h2>Charge around one orbit</h2><span class="sub">${BAT.balance_mah!=null?`Net ${BAT.balance_mah>=0?'+':''}${BAT.balance_mah} mAh per orbit`:''}${BAT.eclipse_mah!=null?` · ${BAT.eclipse_mah} mAh used per eclipse`:''} · ${Math.round((BAT.coverage||0)*100)}% of the orbit covered by data so far</span></div><div class="chartbox">${batChart(BAT)}</div>
     <div class="legend"><span><i class="band" style="background:var(--ok)"></i>Charging (more in than out)</span><span><i class="band" style="background:var(--crit)"></i>Discharging</span><span><i style="background:var(--t2)"></i>Battery voltage</span><span><i class="band" style="background:var(--stale);opacity:.4"></i>Earth’s shadow</span></div></div>`;
   h+=`<div class="panel"><div class="ph"><h2>Checks</h2></div>${BAT.checks.map(c=>{const [cl,lb]=B_ST[c.status]||['',c.status];return `<div class="alert"><span class="pill ${cl}">${lb}</span><span class="msg">${esc(c.title)} <span class="mono" style="font-weight:600;margin-left:6px">${esc(c.value)}</span></span><span></span><span class="meta" style="font-family:var(--f-body);font-size:13px">${esc(c.detail)}</span></div>`}).join('')||'<div class="empty">No checks yet.</div>'}</div>`;
   const lp=BAT.life_params;
@@ -1094,7 +1098,7 @@ function renderRestarts(){
 /* ---------- globe: where the satellite is now ---------- */
 // Orthographic projection drawn on a canvas: graticule, Natural Earth coastlines and borders,
 // the night side, the ground track (past solid, next orbit dashed), the satellite's radio
-// footprint, and its heading. Positions come from SGP4 on the Pi, every 30 s; in between the
+// footprint, and its heading. Positions come from SGP4 on the server, every 30 s; in between the
 // browser interpolates on the sphere, so the dot moves smoothly.
 const RAD=Math.PI/180,R_E=6371;
 const G={world:null,track:null,rot:[0,20],follow:true,drag:null,idle:null,cv:null,ctx:null,sat:null,raf:0};
@@ -1285,7 +1289,7 @@ async function poll(kind){
 }
 async function boot(){
   try{FLEET=await api('/api/satellites');const on=FLEET.filter(f=>f.enabled);if(!on.some(f=>f.norad===SAT)&&!FLEET.some(f=>f.norad===SAT))SAT=(on[0]||FLEET[0]||{}).norad||null}catch(e){}
-  try{CONF=await api('/api/config')}catch(e){$('#liveText').textContent='Could not reach the Downlink Desk server on this Pi';$('#livebar').classList.add('down');setTimeout(boot,5000);return}
+  try{CONF=await api('/api/config')}catch(e){$('#liveText').textContent='Could not reach the Downlink Desk server';$('#livebar').classList.add('down');setTimeout(boot,5000);return}
   CH=CONF.spec.channels||[];CHM=Object.fromEntries(CH.map(c=>[c.id,c]));online=true;
   SAT=CONF.satellite.norad;lsSet('downlinkdesk.sat',SAT);renderPicker();$('#csvLink').href='/api/export/telemetry.csv?sat='+SAT;
   $('#passFld').hidden=!CONF.write_protected;

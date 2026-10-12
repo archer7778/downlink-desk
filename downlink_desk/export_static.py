@@ -62,7 +62,7 @@ def export(cfg, out, refresh_hours=6, log=print):
     _w(api / "spaceweather.json", app.spaceweather(7))
     summ = app.summary()
     summ.update(phone=False, text="\n".join(l for l in summ.get("text", "").splitlines()
-                                             if not l.startswith(("Pi:", "Software:"))))
+                                             if not l.startswith(("Server disk:", "Pi:", "Software:"))))
     _w(api / "summary.json", summ)
     with app.ro() as c:
         _w(api / "catalog.json", [e for e in entries(c, cfg) if e["norad"] == n])

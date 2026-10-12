@@ -162,7 +162,7 @@ def build(conn, cfg, now=None):
         out.append("Space weather: " + ", ".join(bits))
     st = dbm.storage(conn, cfg.db_path)
     if "disk_total" in st:
-        out.append(f"Pi: SD card {1 - st['disk_free'] / st['disk_total']:.0%} used ({st['disk_free'] / 1e9:.1f} GB free of "
+        out.append(f"Server disk: {1 - st['disk_free'] / st['disk_total']:.0%} used ({st['disk_free'] / 1e9:.1f} GB free of "
                    f"{st['disk_total'] / 1e9:.0f} GB), database {st['db_bytes'] / 1e6:.1f} MB"
                    + (" ⚠" if st.get("level") != "ok" else ""))
         if st.get("level") != "ok":

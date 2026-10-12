@@ -230,6 +230,11 @@ def _period(conn, norad):
     return 95.0, None
 
 
+def _round_sig(x, n=2):
+    """745,291 -> 750,000: a model's answer shouldn't look more precise than it is."""
+    return int(float(f"{x:.{n}g}")) if x else x
+
+
 def _check(cid, title, status, value, detail):
     return {"id": cid, "title": title, "status": status, "value": value, "detail": detail}
 
@@ -508,8 +513,11 @@ def analyse(conn, spec, norad, launched=None, now=None):
             C.append(_check("life", "Estimated battery life (model)", st,
                             f"≈{L['capacity_now']:.0%} capacity",
                             f"{cycles:,.0f} charge cycles in {years:.1f} years since launch. At {dod:.0%} depth and a median "
-                            f"{med_t:.0f} °C, cells like these last roughly {L['cycle_life']:,} cycles to {life_p['eol_capacity']:.0%} capacity. "
-                            f"Estimated {L['capacity_range'][0]:.0%}–{L['capacity_range'][1]:.0%} of original capacity left, and "
+                            f"{med_t:.0f} °C, " + (
+                                f"cells like these last roughly {_round_sig(L['cycle_life']):,} cycles to {life_p['eol_capacity']:.0%} capacity. "
+                                if L["cycle_life"] < 100_000 else
+                                "cycling this shallow barely wears the cells (well over 100,000 cycles), so ageing with time matters more. ")
+                            + f"Estimated {L['capacity_range'][0]:.0%}–{L['capacity_range'][1]:.0%} of original capacity left, and "
                             f"{L['years_left_range'][0]:.0f}–{L['years_left_range'][1]:.0f} years before it reaches "
                             f"{life_p['eol_capacity']:.0%}. A model from assumed battery data, not a measurement."))
 
