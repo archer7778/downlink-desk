@@ -1,0 +1,1 @@
+anduril-lattice-sdk==5.3.0   # tests only: checks every payload against the SDK's own models (not needed on the Pi)
