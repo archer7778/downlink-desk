@@ -20,6 +20,11 @@ DEFAULTS = {
                "summary_hour": 7, "timezone": ""},
     "spaceweather": {"enabled": True, "api": "https://services.swpc.noaa.gov"},
     "updates": {"auto_update": True},
+    "lattice": {"enabled": False, "url": "", "token_file": "secrets/lattice_token", "client_id": "",
+                "client_secret_file": "secrets/lattice_client_secret",
+                "sandbox_token_file": "secrets/lattice_sandbox_token", "node_name": "", "node_location": "rounded",
+                "publish_seconds": 30, "station_minutes": 5, "expiry_minutes": 15, "tasks": True,
+                "expedite_minutes": 10, "max_tasks": 3, "simulated": False},
 }
 
 

@@ -1,0 +1,24 @@
+[Unit]
+Description=Downlink Desk: publish to Anduril Lattice (optional)
+After=network-online.target time-sync.target
+Wants=network-online.target
+
+[Service]
+User=@USER@
+WorkingDirectory=@ROOT@
+Environment=DOWNLINK_DESK_CONFIG=@ROOT@/config.toml
+ExecStart=@ROOT@/.venv/bin/python -m downlink_desk.lattice
+Restart=on-failure
+RestartSec=30
+Nice=5
+
+# Sandboxing: no privilege gain, a private /tmp, and the operating system read-only.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+
+[Install]
+WantedBy=multi-user.target
