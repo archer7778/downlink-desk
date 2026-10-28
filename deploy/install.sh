@@ -60,7 +60,7 @@ fi
 
 say "4/5  Installing background services"
 for unit in downlink-desk-web.service downlink-desk-fetch.service downlink-desk-fetch.timer \
-            downlink-desk-update.service downlink-desk-update.timer; do
+            downlink-desk-update.service downlink-desk-update.timer downlink-desk-lattice.service; do
   sed -e "s#@ROOT@#${ROOT}#g" -e "s#@USER@#${USER_NAME}#g" "deploy/${unit}" | sudo tee "/etc/systemd/system/${unit}" >/dev/null
 done
 cfgval() { awk -F= -v k="$1" '$1 ~ "^"k"[ ]*$" {sub(/#.*/,"",$2); gsub(/[ "]/,"",$2); print $2; exit}' config.toml; }

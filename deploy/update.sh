@@ -81,6 +81,7 @@ rollback() {
   if [ "$(id -u)" -eq 0 ]; then
     grep -qE '^deploy/.*\.(service|timer)$' <<<"$CHANGED" && install_units
     systemctl restart downlink-desk-web 2>/dev/null
+    systemctl try-restart downlink-desk-lattice 2>/dev/null   # only if it's switched on
   fi
   status failed "Update to $REMOTE failed ($1); rolled back to $LOCAL." "$LOCAL" "$REMOTE"
   exit 1
@@ -90,7 +91,7 @@ as_user git merge -q --ff-only "origin/$BRANCH" || rollback "git merge"
 if grep -q '^requirements.txt$' <<<"$CHANGED"; then
   as_user .venv/bin/pip install -q -r requirements.txt || rollback "installing Python packages"
 fi
-as_user .venv/bin/python -c "import downlink_desk.server, downlink_desk.fetch" || rollback "the new code doesn't load"
+as_user .venv/bin/python -c "import downlink_desk.server, downlink_desk.fetch, downlink_desk.lattice" || rollback "the new code doesn't load"
 
 if [ "$(id -u)" -eq 0 ]; then
   if grep -qE '^deploy/.*\.(service|timer)$' <<<"$CHANGED"; then
@@ -100,6 +101,7 @@ if [ "$(id -u)" -eq 0 ]; then
     systemctl enable --now downlink-desk-fetch.timer downlink-desk-update.timer >/dev/null 2>&1
   fi
   systemctl restart downlink-desk-web
+  systemctl try-restart downlink-desk-lattice 2>/dev/null   # only if it's switched on
   PORT="$(cfgval port)"; PORT="${PORT:-8080}"
   ok=""
   for _ in $(seq 1 20); do
