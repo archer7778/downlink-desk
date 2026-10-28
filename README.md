@@ -54,6 +54,11 @@ It's plain Python and SQLite, so it runs on any Linux machine: a desktop, a serv
 - **Polite to SatNOGS:** at least 11 seconds between requests, a fetch every 30 minutes, and it backs off when asked.
 - **Cheap to watch:** an open console fetches only what's new and gets updates pushed to it, so leaving it open all day costs almost nothing, even on a small computer.
 
+**Joins an Anduril Lattice mesh (optional)**
+- **Publishes to [Lattice](https://developer.anduril.com):** each satellite as an entity with its orbit, live position, health by subsystem and active alerts; the Downlink Desk node itself, with the health of its links and storage; and the SatNOGS stations due to hear your satellites.
+- **Takes a task:** a Lattice operator can ask the node to *expedite a pass*. It reports back through Lattice's standard task lifecycle while it collects that pass's frames the moment the station uploads them, instead of at the next 30-minute fetch. It still commands nothing.
+- **Local first:** the bridge runs as its own service with its own queue. If the link to Lattice drops, the console, alarms and fetches carry on, updates queue on the Pi, and when the link returns every alarm raised and cleared in the meantime reaches Lattice in order. Interface spec, requirements and verification: [docs/ICD-LATTICE.md](docs/ICD-LATTICE.md).
+
 > ⚠️ **Not flight software.** Downlink Desk is not affiliated with any satellite team, cannot command a spacecraft, and ships with provisional limits chosen for this console rather than the mission's own. Don't use it to make decisions about real hardware.
 
 ## How it works
@@ -78,6 +83,7 @@ NOAA space weather (every 3 h) ────────────────�
 - `deploy/update.sh` (run by a systemd timer after boot and nightly) fast-forwards from GitHub, installs new packages, restarts the console, checks it answers, and rolls back if not. It waits for a running fetch rather than swapping code under it.
 - Failure handling is tested, not assumed: the test suite breaks the SatNOGS connection 14 ways (dropped connections, truncated or non-JSON answers, server errors, junk records, a garbled orbit) and checks each one is recorded as a failed fetch and retried next cycle, with a good orbit never replaced by a bad one. One satellite failing doesn't stop the others; the fetch waits if the clock hasn't synced after boot (a Pi has no clock battery); the console and the fetch job write to the same database at once without locking each other out.
 - `downlink_desk/spacewx.py` reads NOAA SWPC's public JSON products; `downlink_desk/summary.py` builds the morning summary (`python -m downlink_desk.fetch --summary` prints it).
+- `downlink_desk/lattice.py` is the optional Lattice bridge: standard library only, REST over HTTPS. Positions are geodetic WGS84 from SGP4 with Earth-relative velocity in east-north-up; orbits go out as CCSDS OMM mean elements. Updates pass through a store-and-forward queue in its own SQLite file that keeps every alert transition through an outage and drops superseded position-only updates. Lattice applies an update only if it's newer than what it holds, so replaying the queue in order is safe.
 
 The first satellite is **GRBBeta** (NORAD 60237), a 2U CubeSat from the Technical University of Košice testing a gamma-ray detector. Track more from the **satellite picker** in the console header: it lists every satellite in orbit that SatNOGS can decode, with hand-written bios for a featured few (CroCube, Foresail-1p, CatSat, CubeBel-2, Sharjahsat-1, UWE-4). Satellites without a curated channels file get automatic channels: every numeric field the decoder produces, in raw units.
 
@@ -94,13 +100,27 @@ cd downlink-desk
 
 The installer asks for your location and API key, sets up the console, the fetch job and the updater to start at every boot, and prints the console address (for example `http://groundpi.local:8080`). After that it keeps itself up to date. Optional extras in `config.toml`: phone alerts (`ntfy_topic`), your time zone for the morning summary, and `auto_update = false` if you'd rather update by hand.
 
+## Connect to Anduril Lattice (optional)
+
+You need access to a Lattice environment, such as a free [Lattice Sandbox](https://developer.anduril.com/guides/developer-tools/sandboxes) through Anduril's developer program.
+
+1. Put your environment token in `secrets/lattice_token` (or your client ID in `config.toml` and the secret in `secrets/lattice_client_secret`), plus `secrets/lattice_sandbox_token` for a sandbox.
+2. Under `[lattice]` in `config.toml`, set `enabled = true` and `url` to your environment's address.
+3. See exactly what it would send, without sending anything: `.venv/bin/python -m downlink_desk.lattice --dry-run`
+4. Start it: `sudo systemctl enable --now downlink-desk-lattice`
+
+Your station's position goes to Lattice rounded to 0.1° (about 10 km) unless you set `node_location = "exact"` or `"none"`. `python -m downlink_desk.lattice --status` shows the link state and how many updates are waiting.
+
 ## Develop and test
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python tests/test_pipeline.py           # fetch → decode → store → verify, against a mock SatNOGS
+.venv/bin/python tests/test_lattice.py            # Lattice bridge, against mock Lattice and SatNOGS servers
 .venv/bin/python tests/mock_satnogs.py --port 8765 # offline demo data source
 ```
+
+With `.venv/bin/pip install -r requirements-dev.txt`, the Lattice tests also check every payload the bridge sends against the official Lattice SDK's own models: every field name, type and enum value.
 
 ## Limitations
 
@@ -112,11 +132,13 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 - The audit trail is tamper-evident, not tamper-proof: someone with access to the machine's files could rebuild the chain.
 - No user accounts. Run it on your home network or a private network such as Tailscale, and set `write_passcode` if others can reach it. Changes are only accepted from the console's own page, so another website can't make them through a visitor's browser.
 - The updater runs code from this repository with administrator rights on the machine, so anyone who can push to the repository can run code on it. Keep your GitHub account secure, or set `auto_update = false`.
+- The Lattice bridge has been tested against a mock Lattice server and the official SDK's data model, not yet against a real Lattice environment. The open items are in [docs/ICD-LATTICE.md](docs/ICD-LATTICE.md#10-open-items).
 
 ## Credits
 
 - Telemetry: the [SatNOGS](https://satnogs.org) network, run by the [Libre Space Foundation](https://libre.space) and volunteer station operators. SatNOGS data is licensed [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
 - Decoding: [satnogs-decoders](https://pypi.org/project/satnogs-decoders/). Orbits: [python-sgp4](https://pypi.org/project/sgp4/).
+- Lattice is Anduril Industries' software; the bridge follows its public [developer documentation](https://developer.anduril.com) and is not affiliated with or endorsed by Anduril. The [Lattice SDK](https://pypi.org/project/anduril-lattice-sdk/) is used only by the tests.
 - Map outlines: [Natural Earth](https://www.naturalearthdata.com) (public domain), via [world-atlas](https://github.com/topojson/world-atlas).
 - Space weather: [NOAA Space Weather Prediction Center](https://www.swpc.noaa.gov) (public domain).
 - GRBBeta is operated by its own team: <https://grbbeta.tuke.sk/>.
