@@ -1,0 +1,44 @@
+// Task definitions Downlink Desk accepts from Anduril Lattice. See docs/ICD-LATTICE.md §5.
+//
+// Lattice carries a task's specification as a google.protobuf.Any. Over REST it arrives as JSON:
+//   {"@type": "type.googleapis.com/downlinkdesk.v1.ExpeditePass", "noradCatId": 60237, ...}
+syntax = "proto3";
+
+package downlinkdesk.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// Collect one SatNOGS pass's data as soon as the station uploads it.
+// After the pass ends, the node fetches the satellite every few minutes (instead of every 30)
+// until that station's frames arrive or the deadline passes. It commands nothing.
+message ExpeditePass {
+  // NORAD catalogue number of a satellite this node tracks.
+  int32 norad_cat_id = 1;
+  // SatNOGS Network observation ID. 0 or absent: the next observation of the satellite that
+  // hasn't ended.
+  int32 observation_id = 2;
+  // How long after the pass ends to keep trying, in minutes. 0 or absent: the node's
+  // upload_grace_hours (3 h by default). At most 720.
+  int32 deadline_minutes = 3;
+}
+
+// Sent with STATUS_EXECUTING.
+message ExpeditePassProgress {
+  int32 observation_id = 1;
+  string station_name = 2;
+  google.protobuf.Timestamp pass_end_time = 3;
+  google.protobuf.Timestamp deadline_time = 4;
+  int32 fetches = 5;
+  google.protobuf.Timestamp next_fetch_time = 6;
+}
+
+// Sent with STATUS_DONE_OK.
+message ExpeditePassResult {
+  int32 observation_id = 1;
+  string station_name = 2;
+  int32 frames_received = 3;
+  int32 frames_decoded = 4;
+  google.protobuf.Timestamp first_frame_time = 5;
+  google.protobuf.Timestamp last_frame_time = 6;
+  int32 fetches = 7;
+}
