@@ -8,6 +8,8 @@ Then point config.toml's [satnogs] api at http://127.0.0.1:8765/api
 """
 import argparse
 import json
+import sys
+from pathlib import Path
 import random
 import struct
 import time
@@ -15,8 +17,47 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-TLE = ("1 60237U 24128C   26283.93962216  .00003793  00000-0  26257-3 0  9991",
-       "2 60237  61.9894 169.9307 0023442 160.3425 199.8578 15.07305724123713")
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))   # run on its own: find downlink_desk
+
+BASE_TLE = ("1 60237U 24128C   26283.93962216  .00003793  00000-0  26257-3 0  9991",
+            "2 60237  61.9894 169.9307 0023442 160.3425 199.8578 15.07305724123713")
+
+
+def _checksum(line):
+    return str(sum(int(c) if c.isdigit() else c == "-" for c in line[:68]) % 10)
+
+
+def _with_raan(tle, raan):
+    l2 = tle[1][:17] + f"{raan % 360:8.4f}" + tle[1][25:68]
+    return tle[0], l2 + _checksum(l2)
+
+
+def _seasonal_tle(base, now_ms=None):
+    """The base orbit with its plane turned so the satellite passes through Earth's shadow every
+    orbit for the three weeks before today and the day after. A 62° orbit spends a few days of
+    every two months in constant sunlight; tests that build weeks of synthetic data ending today
+    need shadow, whatever today's date is. Only the node angle changes (still a valid orbit)."""
+    from downlink_desk.orbit import eclipses
+    now_ms = now_ms or int(time.time() * 1000)
+    samples = [now_ms + d * 86_400_000 for d in (-22, -15, -8, -5, -1, 0, 1)]
+    best, best_raan = -1.0, float(base[1][17:25])
+    for k in range(24):
+        raan = float(base[1][17:25]) + 15 * k
+        cand = _with_raan(base, raan)
+        worst = 99.0
+        for t in samples:
+            ec = [b - a for a, b in eclipses(*cand, t, t + 5 * 3600_000, 60)[1:-1]]
+            worst = min(worst, min(ec) / 60_000 if ec else 0.0)
+            if worst <= best:
+                break
+        if worst > best:
+            best, best_raan = worst, raan
+        if best >= 30:
+            break
+    return _with_raan(base, best_raan)
+
+
+TLE = _seasonal_tle(BASE_TLE)
 OBSERVERS = ["N0SSE-EM13ke", "KM7DOS-CN87xi", "IV3DXW-JN65qq", "Piszkesteto UHF-JN97ww", "KC1OCA-FN32uc"]
 
 

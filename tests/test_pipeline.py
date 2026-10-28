@@ -114,8 +114,10 @@ def test_pipeline():
                 {"id": 6, "end": 6, "status": "awaiting", "max_alt": 60}]   # still within the upload grace
         assert [o["id"] for o in silent_streak(fake, cfg)] == [2, 4, 5]
         # eclipse model: a 560 km orbit spends roughly 30-36 minutes per orbit in shadow
+        # (checked at the orbit data's epoch, not today: some weeks the orbit is in full sunlight)
         from downlink_desk.orbit import eclipses
-        ec = eclipses(tle["tle1"], tle["tle2"], dbm.now_ms(), dbm.now_ms() + 6 * 3600_000)
+        ep = tle["epoch_ms"]
+        ec = eclipses(tle["tle1"], tle["tle2"], ep, ep + 6 * 3600_000)
         assert ec and all(25 < (b - a) / 60000 < 40 for a, b in ec[1:-1]), ec
         # phone alerts: a restart in newly fetched frames reaches the ntfy server once
         from http.server import BaseHTTPRequestHandler, HTTPServer
