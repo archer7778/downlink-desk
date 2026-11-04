@@ -1,0 +1,46 @@
+name: Change request
+description: Ask for a change to a configuration item (ECSS-M-ST-40C Annex G fields)
+title: "CR: "
+labels: ["change-request"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The issue number is the CR number: issue #12 is CR-012. Cite it in every commit that implements the change, for example `CR-012: pin requirements`.
+  - type: input
+    id: affected_items
+    attributes:
+      label: Affected item(s)
+      description: CI IDs from cm/CIL.md
+    validations:
+      required: true
+  - type: input
+    id: affected_documents
+    attributes:
+      label: Affected document(s)
+      description: Paths from cm/CIDL.md, and the operator's manual if it's affected
+  - type: textarea
+    id: reason
+    attributes:
+      label: Reason for change
+      description: What's wrong or missing, with evidence
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Description of change
+      description: What will change, in enough detail to implement
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      description: On installed copies (the updater delivers whatever lands on main), the demo, tests, interfaces and documentation
+    validations:
+      required: true
+  - type: markdown
+    attributes:
+      value: |
+        **For the configuration manager:** record classification (class 1 or 2), approval and authorisation to proceed as a comment, then add the label `approved` or `rejected`.
