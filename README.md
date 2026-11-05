@@ -1,8 +1,8 @@
 # Downlink Desk
 
-**A ground-segment operations console for real satellites: live telemetry, a learned health model, alarms and a signed audit trail.**
+**A ground-segment operations console for real satellites: live telemetry, a learned health model, alarms and a hash-chained, tamper-evident audit trail.**
 
-Downlink Desk watches real satellites in orbit: mostly CubeSats, but anything the SatNOGS network can decode, from 30-year-old amateur microsatellites to the International Space Station. It pulls their telemetry from the [SatNOGS](https://satnogs.org) volunteer ground-station network, decodes it, learns what normal looks like for each spacecraft, and runs a small operations console around it: alarms, a live feed, phone alerts, space weather and a signed audit trail.
+Downlink Desk watches real satellites in orbit: mostly CubeSats, but anything the SatNOGS network can decode, from 30-year-old amateur microsatellites to the International Space Station. It pulls their telemetry from the [SatNOGS](https://satnogs.org) volunteer ground-station network, decodes it, learns what normal looks like for each spacecraft, and runs a small operations console around it: alarms, a live feed, phone alerts, space weather and a hash-chained, tamper-evident audit trail.
 
 It's plain Python and SQLite, so it runs on any Linux machine: a desktop, a server, or something as small as a Raspberry Pi. Mine runs on a Pi Zero 2 W, which it barely touches (load average 0.00, about 150 MB of RAM, roughly 1.5 GB of data a year for a busy CubeSat).
 
@@ -44,7 +44,7 @@ It's plain Python and SQLite, so it runs on any Linux machine: a desktop, a serv
 
 **Runs like a real operations desk**
 - **Morning summary on your phone** through the free ntfy app: last night's frames, stations, restarts, drifts, storms and the day's best pass. Alarms, restarts and silence are pushed as they happen.
-- **A signed audit trail:** every acknowledgement, shelved (temporarily silenced) alert, limit change and handover is recorded, and each entry carries a fingerprint of the one before it, so an edit or deletion shows up when you verify the log.
+- **A hash-chained, tamper-evident audit trail:** every acknowledgement, shelved (temporarily silenced) alert, limit change and handover is recorded, and each entry carries a SHA-256 hash of its own content and of the entry before it, so an edit or deletion shows up when you verify the log.
 - **Looks after itself:** starts at boot, updates itself from GitHub after boot and nightly (rolling back if the new version doesn't come up), and watches free disk space.
 - **Shift handover report, daily check, equipment status,** and a **training simulator** with fault injection.
 - **Several satellites at once:** a picker with bios for featured CubeSats, and a catalog of every satellite in orbit that SatNOGS can decode (over 150 decoders: CubeSats, older microsatellites, the ISS and even a geostationary satellite).

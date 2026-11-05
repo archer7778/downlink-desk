@@ -1,4 +1,4 @@
-"""The signed audit trail. The server is the only writer, so entries form a
+"""The hash-chained, tamper-evident audit trail. The server is the only writer, so entries form a
 single chain: each one stores the SHA-256 of its own content plus the previous
 entry's hash. Editing or deleting an entry breaks the chain from that point."""
 import hashlib
